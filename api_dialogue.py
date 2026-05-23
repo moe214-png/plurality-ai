@@ -36,14 +36,14 @@ RETRYABLE_NETWORK_MARKERS = (
 )
 
 DEFAULT_CONFIG = {
-    "max_rounds": 1,
-    "delay_seconds": 1,
+    "max_rounds": 15,
+    "delay_seconds": 0,
     "max_output_tokens": 1200,
-    "response_min_chars": 160,
-    "response_max_chars": 260,
+    "response_min_chars": 1,
+    "response_max_chars": 80,
     "continue_on_error": True,
-    "dialogue_mode": "work",
-    "turn_mode": "fixed",
+    "dialogue_mode": "chat",
+    "turn_mode": "natural",
     "natural_selector": "all",
     "natural_pick_strategy": "sample",
     "natural_judge_model_id": "deepseek",
@@ -53,8 +53,8 @@ DEFAULT_CONFIG = {
     "natural_balance_window": 8,
     "natural_balance_strength": 1.0,
     "natural_silence_fallback": True,
-    "self_memory_turns": 5,
-    "conversation_goal": "四个 AI 围绕用户问题进行接力讨论。每个 AI 应先回应上一位的观点，再补充自己的判断。",
+    "self_memory_turns": 15,
+    "conversation_goal": "四个 AI 像朋友一样围绕用户的话题自然接话。不要做报告，不要列清单，优先使用连续的句子和轻松的短段落。",
     "models": [
         {
             "id": "claude",
@@ -66,7 +66,7 @@ DEFAULT_CONFIG = {
             "base_url": "https://api.tokenfree.shop/v1",
             "model": "claude-sonnet-4-6",
             "api_key_env": "CLAUDE_API_KEY",
-            "system_prompt": "你是 Claude，擅长严谨分析、发现遗漏和提出清晰结构。",
+            "system_prompt": "你是 Claude。你说话温和、细腻、会认真接住对方的情绪。闲聊模式下不要列条目，不要分析式总结，用自然连续的句子回应，像一个耐心又聪明的朋友。",
         },
         {
             "id": "chatgpt",
@@ -78,7 +78,7 @@ DEFAULT_CONFIG = {
             "base_url": "https://api.tokenfree.shop/v1",
             "model": "gpt-5.5",
             "api_key_env": "OPENAI_API_KEY",
-            "system_prompt": "你是 ChatGPT，擅长综合信息、给出可执行方案和权衡建议。",
+            "system_prompt": "你是 ChatGPT。你擅长把话题接得顺、让聊天继续自然流动。闲聊模式下避免标题和列表，用轻松清楚的段落说话，可以适当追问，但不要像在写方案。",
         },
         {
             "id": "deepseek",
@@ -90,19 +90,19 @@ DEFAULT_CONFIG = {
             "base_url": "https://api.deepseek.com",
             "model": "deepseek-v4-flash",
             "api_key_env": "DEEPSEEK_API_KEY",
-            "system_prompt": "你是 DeepSeek，擅长技术拆解、代码视角和成本效率分析。",
+            "system_prompt": "你是 DeepSeek。你反应直接，偶尔有一点幽默，会把复杂想法说得接地气。闲聊模式下用口语化连续句子，不要写成分析报告。",
         },
         {
             "id": "gemini",
             "name": "Gemini",
             "avatar": "GM",
-            "enabled": True,
+            "enabled": False,
             "speaker_weight": 1.0,
             "provider": "openai_compatible",
             "base_url": "https://api.tokenfree.shop/v1",
             "model": "gemini-3.5-flash",
             "api_key_env": "GEMINI_API_KEY",
-            "system_prompt": "你是 Gemini，擅长多角度推理、长上下文整合和创造性补充。",
+            "system_prompt": "你是 Gemini。你联想丰富，喜欢从不同角度补充话题。闲聊模式下用自然段落表达，保持轻快，不要堆概念或列点。",
         },
     ],
 }
