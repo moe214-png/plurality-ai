@@ -125,11 +125,18 @@ def read_json_body(handler):
     return json.loads(raw or "{}")
 
 
-def response_json(handler, data, status=200):
+def response_json(handler, data, status=200, set_cookie=None, clear_cookie=False):
     body = json.dumps(data, ensure_ascii=False).encode("utf-8")
     handler.send_response(status)
     handler.send_header("Content-Type", "application/json; charset=utf-8")
     handler.send_header("Cache-Control", "no-store")
+    if set_cookie:
+        handler.send_header("Set-Cookie", set_cookie)
+    if clear_cookie:
+        handler.send_header(
+            "Set-Cookie",
+            f"{SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0",
+        )
     handler.send_header("Content-Length", str(len(body)))
     handler.end_headers()
     handler.wfile.write(body)
@@ -716,8 +723,8 @@ def handle_register(handler):
                 dst.write_bytes(src.read_bytes())
 
     token = create_session(username)
-    set_session_cookie(handler, token)
-    response_json(handler, {"ok": True, "username": username})
+    cookie = f"{SESSION_COOKIE}={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={SESSION_MAX_AGE}"
+    response_json(handler, {"ok": True, "username": username}, set_cookie=cookie)
 
 
 def handle_login(handler):
@@ -742,16 +749,15 @@ def handle_login(handler):
 
     ensure_user_dir(match)
     token = create_session(match)
-    set_session_cookie(handler, token)
-    response_json(handler, {"ok": True, "username": match})
+    cookie = f"{SESSION_COOKIE}={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={SESSION_MAX_AGE}"
+    response_json(handler, {"ok": True, "username": match}, set_cookie=cookie)
 
 
 def handle_logout(handler):
     if MULTI_USER:
         cookies = parse_cookies(handler)
         delete_session(cookies.get(SESSION_COOKIE, ""))
-    clear_session_cookie(handler)
-    response_json(handler, {"ok": True})
+    response_json(handler, {"ok": True}, clear_cookie=True)
 
 
 class PanelHandler(BaseHTTPRequestHandler):
@@ -880,14 +886,18 @@ class PanelHandler(BaseHTTPRequestHandler):
 
         # Multi-user public POST endpoints (no auth required)
         if MULTI_USER:
-            if path == "/api/register":
-                handle_register(self)
-                return
-            elif path == "/api/login":
-                handle_login(self)
-                return
-            elif path == "/api/logout":
-                handle_logout(self)
+            try:
+                if path == "/api/register":
+                    handle_register(self)
+                    return
+                elif path == "/api/login":
+                    handle_login(self)
+                    return
+                elif path == "/api/logout":
+                    handle_logout(self)
+                    return
+            except Exception as exc:
+                response_json(self, {"ok": False, "error": f"服务器内部错误: {str(exc)}"}, 500)
                 return
 
         if not authorized(self):
