@@ -1507,10 +1507,6 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           对话目标
           <textarea id="goal"></textarea>
         </label>
-        <label>
-          初始提示词
-          <textarea id="prompt" placeholder="输入你想让四个 AI 讨论的问题"></textarea>
-        </label>
       </div>
       <div class="settings-grid">
         <label>
@@ -1563,8 +1559,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         </label>
       </div>
       <div class="buttons">
-        <button class="tool-button" id="startBtn" onclick="startDialogue()"><span class="icon">▶</span><span>开始</span></button>
-        <button class="secondary tool-button" id="continueBtn" onclick="continueDialogue()"><span class="icon">↻</span><span>继续</span></button>
+        <button class="secondary tool-button" id="continueBtn" onclick="continueDialogue()"><span class="icon">↻</span><span>无输入继续</span></button>
         <button class="secondary tool-button" id="stopBtn" onclick="stopDialogue()"><span class="icon">■</span><span id="stopLabel">停止</span></button>
         <button class="danger tool-button" onclick="clearDialogue()"><span class="icon">×</span><span>清空</span></button>
       </div>
@@ -1572,7 +1567,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         <div class="section-title">AI 人格设置</div>
         <div id="models" class="models"></div>
       </div>
-      <p class="notice">API key 只从本地 .env 读取，不会显示在网页里。修改人格后点开始会自动保存配置。</p>
+      <p class="notice">API key 只从本地 .env 读取，不会显示在网页里。修改设置后发送消息时自动保存配置。</p>
     </section>
     <section class="chat">
       <div class="chat-toolbar">
@@ -1589,7 +1584,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         </div>
       </div>
       <div id="messages" class="messages">
-        <div class="empty">还没有对话。输入提示词后点击开始。</div>
+        <div class="empty">还没有对话。在下方输入消息开始聊天。</div>
       </div>
       <div id="typingIndicator" class="typing">
         <span class="avatar" id="typingAvatar">AI</span>
@@ -1599,8 +1594,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         </span>
       </div>
       <div class="interject">
-        <textarea id="interjectText" placeholder="运行中也可以在这里插话，下一位 AI 会看到"></textarea>
-        <button class="secondary tool-button" onclick="interject()"><span class="icon">+</span><span>插话</span></button>
+        <textarea id="interjectText" placeholder="在这里输入消息，回车或点发送开始对话"></textarea>
+        <button class="tool-button" onclick="interject()"><span class="icon">▶</span><span>发送</span></button>
       </div>
     </section>
   </main>
@@ -1871,16 +1866,15 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       };
     }
 
-    async function runDialogue(reset) {
+    async function runDialogue(reset, prompt) {
       try {
         const payload = {
-          prompt: document.getElementById('prompt').value.trim(),
+          prompt: prompt || '',
           rounds: Number(document.getElementById('rounds').value || 1),
           reset,
           config: collectConfig(),
         };
         await api('/api/start', { method: 'POST', body: JSON.stringify(payload) });
-        document.getElementById('prompt').value = '';
         await loadConfig();
         await refreshAll();
       } catch (error) {
@@ -1888,12 +1882,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       }
     }
 
-    async function startDialogue() {
-      await runDialogue(true);
-    }
-
     async function continueDialogue() {
-      await runDialogue(false);
+      await runDialogue(false, '');
     }
 
     async function stopDialogue() {
@@ -1925,10 +1915,15 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       const box = document.getElementById('interjectText');
       const content = box.value.trim();
       if (!content) return;
+      box.value = '';
       try {
-        await api('/api/interject', { method: 'POST', body: JSON.stringify({ content }) });
-        box.value = '';
-        await refreshDialogue();
+        const status = await api('/api/status');
+        if (!status.running) {
+          await runDialogue(true, content);
+        } else {
+          await api('/api/interject', { method: 'POST', body: JSON.stringify({ content }) });
+          await refreshDialogue();
+        }
       } catch (error) {
         alert(error.message);
       }
@@ -1958,17 +1953,6 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         }
       });
 
-      const promptBox = document.getElementById('prompt');
-      promptBox.addEventListener('keydown', event => {
-        if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
-          event.preventDefault();
-          if (hasMessages) {
-            continueDialogue();
-          } else {
-            startDialogue();
-          }
-        }
-      });
     }
 
     async function refreshStatus() {
@@ -1983,7 +1967,6 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       document.getElementById('runText').textContent = showStopped ? '已停止' : (status.stop_requested ? '停止中' : (status.running ? '运行' : '待机'));
       document.getElementById('currentModel').textContent = status.running ? '' : '当前模型：-';
       document.getElementById('progressText').textContent = `进度：${status.completed_calls || 0}/${status.total_calls || 0}`;
-      document.getElementById('startBtn').disabled = status.running;
       document.getElementById('continueBtn').disabled = status.running;
       document.getElementById('stopBtn').disabled = !status.running || status.stop_requested;
       document.getElementById('stopLabel').textContent = showStopped ? '已停止' : (status.stop_requested ? '停止中' : '停止');
