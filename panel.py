@@ -681,15 +681,16 @@ def handle_register(handler):
         response_json(handler, {"ok": False, "error": "用户名和密码不能为空"}, 400)
         return
     if not re.match(r'^[a-zA-Z0-9_一-鿿]{2,30}$', username):
-        response_json(handler, {"ok": False, "error": "用户名格式不正确（2-30位字母、数字、下划线或中文）"}, 400)
+        response_json(handler, {"ok": False, "error": f"用户名格式不正确'（{username}'——2-30位字母、数字、下划线或中文）"}, 400)
         return
     if len(password) < 4:
         response_json(handler, {"ok": False, "error": "密码至少需要4位"}, 400)
         return
 
     users = load_users()
+    existing_names = sorted(users.keys())
     if username.lower() in (u.lower() for u in users):
-        response_json(handler, {"ok": False, "error": f"用户名已存在（当前已有 {len(users)} 位用户）"}, 409)
+        response_json(handler, {"ok": False, "error": f"用户名已存在（当前已有 {len(users)} 位用户: {', '.join(existing_names)}）"}, 409)
         return
 
     pw_hash, salt = hash_password(password)
