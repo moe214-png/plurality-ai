@@ -8,6 +8,7 @@ then starts the API dialogue in a background thread.
 """
 
 import base64
+import hashlib
 import io
 import json
 import os
@@ -25,6 +26,7 @@ from urllib.parse import quote, urlparse
 from api_dialogue import (
     CONFIG_FILE,
     LOG_FILE,
+    MARKDOWN_FILE,
     PROVIDER_CALLERS,
     append_entry,
     build_user_prompt,
@@ -45,6 +47,18 @@ FOLDER = Path(__file__).resolve().parent
 HOST = os.environ.get("PANEL_HOST", "0.0.0.0")
 PORT = int(os.environ.get("PORT") or os.environ.get("PANEL_PORT", "5000"))
 EXPORT_INDEX_FILE = FOLDER / "export_index.json"
+
+# ── Multi-user support (activated by PANEL_MULTI_USER=true) ──────────────
+MULTI_USER = os.environ.get("PANEL_MULTI_USER", "").strip().lower() == "true"
+USERS_FILE = FOLDER / "users.json"
+SESSIONS_FILE = FOLDER / "sessions.json"
+SESSION_COOKIE = "panel_session"
+SESSION_MAX_AGE = int(os.environ.get("PANEL_SESSION_DAYS", "7")) * 86400
+USERS_BASE = FOLDER / "users"
+
+RUNNER_THREADS = {}
+RUNNER_STATES = {}
+RUNNER_LOCK = threading.Lock()
 
 MODE_PRESETS = {
     "chat": {
@@ -149,6 +163,8 @@ def panel_credentials():
 
 
 def authorized(handler):
+    if MULTI_USER:
+        return get_user_from_cookie(handler) is not None
     _user, password = panel_credentials()
     if not password:
         return True
@@ -165,6 +181,15 @@ def authorized(handler):
 
 
 def require_auth(handler):
+    if MULTI_USER:
+        body = json.dumps({"error": "Unauthorized", "login_required": True}).encode("utf-8")
+        handler.send_response(401)
+        handler.send_header("Content-Type", "application/json; charset=utf-8")
+        handler.send_header("Cache-Control", "no-store")
+        handler.send_header("Content-Length", str(len(body)))
+        handler.end_headers()
+        handler.wfile.write(body)
+        return
     handler.send_response(401)
     handler.send_header("WWW-Authenticate", 'Basic realm="AI Panel"')
     handler.send_header("Cache-Control", "no-store")
@@ -189,10 +214,9 @@ def response_download(handler, path, filename, content_type):
     handler.wfile.write(body)
 
 
-def response_export_bundle(handler):
-    markdown_path = FOLDER / "api_dialogue.md"
-    json_path = LOG_FILE
-    base_name = export_filename("zip").rsplit(".", 1)[0]
+def response_export_bundle(handler, username=None):
+    _cfg, json_path, markdown_path, _exp = user_file_paths(username)
+    base_name = export_filename("zip", username).rsplit(".", 1)[0]
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         archive.writestr(f"{base_name}.md", markdown_path.read_text(encoding="utf-8") if markdown_path.exists() else "")
@@ -242,24 +266,165 @@ def safe_filename_part(text, fallback="对话记录", max_length=36):
     return (text or fallback)[:max_length]
 
 
-def export_filename(extension):
-    log = load_log()
+# ── Multi-user: user database ────────────────────────────────────────────
+
+def load_users():
+    if not USERS_FILE.exists():
+        return {}
+    with open(USERS_FILE, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def save_users(users):
+    with open(USERS_FILE, "w", encoding="utf-8") as f:
+        json.dump(users, f, ensure_ascii=False, indent=2)
+
+
+def hash_password(password, salt=None):
+    if salt is None:
+        salt = secrets.token_bytes(16)
+    elif isinstance(salt, str):
+        salt = bytes.fromhex(salt)
+    dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, 100000)
+    return dk.hex(), salt.hex()
+
+
+def verify_password(password, stored_hash, stored_salt):
+    computed, _ = hash_password(password, stored_salt)
+    return secrets.compare_digest(computed, stored_hash)
+
+
+# ── Multi-user: session management ───────────────────────────────────────
+
+def load_sessions():
+    if not SESSIONS_FILE.exists():
+        return {}
+    with open(SESSIONS_FILE, "r", encoding="utf-8") as f:
+        sessions = json.load(f)
+    now = time.time()
+    return {tok: s for tok, s in sessions.items() if s.get("expires", 0) > now}
+
+
+def save_sessions(sessions):
+    with open(SESSIONS_FILE, "w", encoding="utf-8") as f:
+        json.dump(sessions, f, ensure_ascii=False, indent=2)
+
+
+def create_session(username):
+    token = secrets.token_urlsafe(32)
+    sessions = load_sessions()
+    sessions[token] = {"username": username, "expires": time.time() + SESSION_MAX_AGE}
+    save_sessions(sessions)
+    return token
+
+
+def validate_session(token):
+    if not token:
+        return None
+    sessions = load_sessions()
+    entry = sessions.get(token)
+    if entry and entry.get("expires", 0) > time.time():
+        return entry["username"]
+    return None
+
+
+def delete_session(token):
+    if not token:
+        return
+    sessions = load_sessions()
+    sessions.pop(token, None)
+    save_sessions(sessions)
+
+
+# ── Multi-user: cookie helpers ───────────────────────────────────────────
+
+def parse_cookies(handler):
+    cookie_header = handler.headers.get("Cookie", "")
+    result = {}
+    for item in cookie_header.split(";"):
+        item = item.strip()
+        if "=" not in item:
+            continue
+        k, v = item.split("=", 1)
+        result[k.strip()] = v.strip()
+    return result
+
+
+def set_session_cookie(handler, token):
+    handler.send_header(
+        "Set-Cookie",
+        f"{SESSION_COOKIE}={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={SESSION_MAX_AGE}",
+    )
+
+
+def clear_session_cookie(handler):
+    handler.send_header(
+        "Set-Cookie",
+        f"{SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0",
+    )
+
+
+def get_user_from_cookie(handler):
+    if not MULTI_USER:
+        return None
+    cookies = parse_cookies(handler)
+    return validate_session(cookies.get(SESSION_COOKIE, ""))
+
+
+# ── Multi-user: user context ─────────────────────────────────────────────
+
+def get_username(handler):
+    if not MULTI_USER:
+        return None
+    return get_user_from_cookie(handler)
+
+
+def user_dir(username):
+    return USERS_BASE / username
+
+
+def ensure_user_dir(username):
+    base = user_dir(username)
+    base.mkdir(parents=True, exist_ok=True)
+    cfg = base / "models_config.json"
+    if not cfg.exists():
+        from api_dialogue import DEFAULT_CONFIG
+        save_json(cfg, DEFAULT_CONFIG)
+    return base
+
+
+def user_file_paths(username):
+    if not username:
+        return CONFIG_FILE, LOG_FILE, MARKDOWN_FILE, EXPORT_INDEX_FILE
+    base = user_dir(username)
+    return (
+        base / "models_config.json",
+        base / "api_dialogue_log.json",
+        base / "api_dialogue.md",
+        base / "export_index.json",
+    )
+
+
+def export_filename(extension, username=None):
+    _cfg_file, log_file, _md_file, exp_file = user_file_paths(username)
+    log = load_log(log_file)
     topic = next((item.get("content", "") for item in log if item.get("role") == "user"), "对话记录")
     topic = safe_filename_part(topic)
     date_part = datetime.now().strftime("%Y%m%d")
     key = f"{topic}_{date_part}"
     try:
-        index = json.loads(EXPORT_INDEX_FILE.read_text(encoding="utf-8"))
+        index = json.loads(exp_file.read_text(encoding="utf-8"))
     except (FileNotFoundError, json.JSONDecodeError):
         index = {}
     next_index = int(index.get(key, 0)) + 1
     index[key] = next_index
-    save_json(EXPORT_INDEX_FILE, index)
+    save_json(exp_file, index)
     return f"{topic}_{date_part}_{next_index:03d}.{extension}"
 
 
-def public_config():
-    config = ensure_config()
+def public_config(username=None):
+    cfg_file, _log, _md, _exp = user_file_paths(username)
+    config = ensure_config(cfg_file)
     config["mode_presets"] = MODE_PRESETS
     return config
 
@@ -277,8 +442,9 @@ def apply_mode_preset(config, mode):
     return config
 
 
-def save_config_from_payload(payload):
-    config = ensure_config()
+def save_config_from_payload(payload, username=None):
+    cfg_file, _log, _md, _exp = user_file_paths(username)
+    config = ensure_config(cfg_file)
     if payload.get("apply_mode_preset"):
         apply_mode_preset(config, payload.get("dialogue_mode"))
     for key in ["max_rounds", "delay_seconds", "max_output_tokens", "response_min_chars", "response_max_chars", "response_target_chars", "continue_on_error", "conversation_goal", "dialogue_mode", "turn_mode", "natural_pick_strategy", "max_consecutive_turns", "natural_balance_enabled", "natural_balance_window", "natural_balance_strength", "natural_silence_fallback", "self_memory_turns"]:
@@ -295,16 +461,41 @@ def save_config_from_payload(payload):
             if field in update:
                 model[field] = update[field]
 
-    save_json(CONFIG_FILE, config)
+    save_json(cfg_file, config)
     return config
 
 
-def current_status():
+def current_status(username=None):
+    if MULTI_USER and username:
+        with RUNNER_LOCK:
+            state = RUNNER_STATES.get(username)
+            if state is None:
+                state = {
+                    "running": False, "stop_requested": False,
+                    "current_model": None, "started_at": None,
+                    "finished_at": None, "last_error": None,
+                    "completed_calls": 0, "total_calls": 0,
+                }
+                RUNNER_STATES[username] = state
+            return dict(state)
     with STATE_LOCK:
         return dict(RUNNER_STATE)
 
 
-def set_status(**kwargs):
+def set_status(username=None, **kwargs):
+    if MULTI_USER and username:
+        with RUNNER_LOCK:
+            state = RUNNER_STATES.get(username)
+            if state is None:
+                state = {
+                    "running": False, "stop_requested": False,
+                    "current_model": None, "started_at": None,
+                    "finished_at": None, "last_error": None,
+                    "completed_calls": 0, "total_calls": 0,
+                }
+                RUNNER_STATES[username] = state
+            state.update(kwargs)
+        return
     with STATE_LOCK:
         RUNNER_STATE.update(kwargs)
 
@@ -313,21 +504,22 @@ def count_enabled_calls(config, rounds):
     return rounds * len(enabled_models(config))
 
 
-def sleep_with_stop(delay_seconds):
+def sleep_with_stop(delay_seconds, username=None):
     end_at = time.time() + max(0, delay_seconds)
     while time.time() < end_at:
-        if current_status().get("stop_requested"):
+        if current_status(username).get("stop_requested"):
             return False
         time.sleep(min(0.25, end_at - time.time()))
     return True
 
 
-def dialogue_worker(config, prompt, reset, rounds):
+def dialogue_worker(config, prompt, reset, rounds, username=None):
     load_dotenv(FOLDER / ".env")
-    log = [] if reset else load_log()
+    _cfg_file, log_file, md_file, _exp_file = user_file_paths(username)
+    log = [] if reset else load_log(log_file)
     if prompt:
         append_entry(log, "user", prompt)
-        save_log(log)
+        save_log(log, log_file=log_file, markdown_file=md_file)
 
     delay_seconds = float(config.get("delay_seconds", 1))
     max_tokens = int(config.get("max_output_tokens", 1200))
@@ -335,6 +527,7 @@ def dialogue_worker(config, prompt, reset, rounds):
     turn_mode = config.get("turn_mode", "fixed")
 
     set_status(
+        username,
         running=True,
         stop_requested=False,
         current_model=None,
@@ -349,21 +542,21 @@ def dialogue_worker(config, prompt, reset, rounds):
         if turn_mode == "natural":
             total_steps = rounds * len(enabled_models(config))
             for _step in range(total_steps):
-                if current_status().get("stop_requested"):
+                if current_status(username).get("stop_requested"):
                     return
-                log = load_log()
-                set_status(current_model="选择发言者")
+                log = load_log(log_file)
+                set_status(username, current_model="选择发言者")
                 model_config, _decisions = choose_next_natural_speaker(config, log)
                 if not model_config:
-                    set_status(last_error="没有 AI 想继续发言")
+                    set_status(username, last_error="没有 AI 想继续发言")
                     return
 
-                set_status(current_model=model_config.get("name"))
+                set_status(username, current_model=model_config.get("name"))
                 caller = PROVIDER_CALLERS.get(model_config.get("provider"))
                 if not caller:
                     raise RuntimeError(f"Unsupported provider: {model_config.get('provider')}")
 
-                log = load_log()
+                log = load_log(log_file)
                 prompt_for_model = build_user_prompt(config, log, model_config)
                 try:
                     content = caller(model_config, prompt_for_model, max_tokens)
@@ -371,26 +564,29 @@ def dialogue_worker(config, prompt, reset, rounds):
                     if not continue_on_error:
                         raise
                     content = format_call_failure(exc)
-                    set_status(last_error=compact_call_error(exc))
+                    set_status(username, last_error=compact_call_error(exc))
 
-                log = load_log()
+                log = load_log(log_file)
                 append_entry(log, "assistant", content, model_config)
-                save_log(log)
-                with STATE_LOCK:
-                    RUNNER_STATE["completed_calls"] += 1
+                save_log(log, log_file=log_file, markdown_file=md_file)
+                with RUNNER_LOCK if (MULTI_USER and username) else STATE_LOCK:
+                    if MULTI_USER and username:
+                        RUNNER_STATES[username]["completed_calls"] += 1
+                    else:
+                        RUNNER_STATE["completed_calls"] += 1
 
-                if not sleep_with_stop(delay_seconds):
+                if not sleep_with_stop(delay_seconds, username):
                     return
         else:
             for _round in range(rounds):
                 for model_config in config.get("models", []):
-                    if current_status().get("stop_requested"):
+                    if current_status(username).get("stop_requested"):
                         return
                     if not model_config.get("enabled", True):
                         continue
 
-                    log = load_log()
-                    set_status(current_model=model_config.get("name"))
+                    log = load_log(log_file)
+                    set_status(username, current_model=model_config.get("name"))
                     caller = PROVIDER_CALLERS.get(model_config.get("provider"))
                     if not caller:
                         raise RuntimeError(f"Unsupported provider: {model_config.get('provider')}")
@@ -402,72 +598,174 @@ def dialogue_worker(config, prompt, reset, rounds):
                         if not continue_on_error:
                             raise
                         content = format_call_failure(exc)
-                        set_status(last_error=compact_call_error(exc))
+                        set_status(username, last_error=compact_call_error(exc))
 
-                    log = load_log()
+                    log = load_log(log_file)
                     append_entry(log, "assistant", content, model_config)
-                    save_log(log)
-                    with STATE_LOCK:
-                        RUNNER_STATE["completed_calls"] += 1
+                    save_log(log, log_file=log_file, markdown_file=md_file)
+                    with RUNNER_LOCK if (MULTI_USER and username) else STATE_LOCK:
+                        if MULTI_USER and username:
+                            RUNNER_STATES[username]["completed_calls"] += 1
+                        else:
+                            RUNNER_STATE["completed_calls"] += 1
 
-                    if not sleep_with_stop(delay_seconds):
+                    if not sleep_with_stop(delay_seconds, username):
                         return
     except Exception as exc:
-        set_status(last_error=compact_call_error(exc))
+        set_status(username, last_error=compact_call_error(exc))
     finally:
         set_status(
+            username,
             running=False,
             current_model=None,
             finished_at=datetime.now().isoformat(timespec="seconds"),
         )
 
 
-def start_dialogue(payload):
+def start_dialogue(payload, username=None):
     global RUNNER_THREAD
-    if current_status().get("running"):
+    if current_status(username).get("running"):
         return {"ok": False, "error": "对话正在运行中"}, 409
 
-    config = save_config_from_payload(payload.get("config", {}))
+    config = save_config_from_payload(payload.get("config", {}), username)
     prompt = (payload.get("prompt") or "").strip()
     reset = bool(payload.get("reset", True))
     rounds = int(payload.get("rounds") or config.get("max_rounds", 1))
+    _cfg_file, log_file, _md_file, _exp_file = user_file_paths(username)
 
     if reset and not prompt:
         return {"ok": False, "error": "新对话需要输入提示词"}, 400
-    if not reset and not prompt and not LOG_FILE.exists():
+    if not reset and not prompt and not log_file.exists():
         return {"ok": False, "error": "没有历史日志，请输入提示词开始"}, 400
 
-    RUNNER_THREAD = threading.Thread(
+    thread = threading.Thread(
         target=dialogue_worker,
-        args=(config, prompt, reset, rounds),
+        args=(config, prompt, reset, rounds, username),
         daemon=True,
     )
-    RUNNER_THREAD.start()
-    return {"ok": True, "status": current_status()}, 200
+    if MULTI_USER and username:
+        RUNNER_THREADS[username] = thread
+    else:
+        RUNNER_THREAD = thread
+    thread.start()
+    return {"ok": True, "status": current_status(username)}, 200
 
 
-def stop_dialogue():
-    if current_status().get("running"):
-        set_status(stop_requested=True)
+def stop_dialogue(username=None):
+    if current_status(username).get("running"):
+        set_status(username, stop_requested=True)
         return {"ok": True, "message": "已请求停止，会在当前 API 调用结束后停下。"}, 200
     return {"ok": True, "message": "当前没有运行中的对话。"}, 200
 
 
-def clear_dialogue():
-    if current_status().get("running"):
+def clear_dialogue(username=None):
+    if current_status(username).get("running"):
         return {"ok": False, "error": "运行中不能清空日志"}, 409
-    save_json(LOG_FILE, [])
-    export_markdown([])
+    _cfg_file, log_file, md_file, _exp_file = user_file_paths(username)
+    save_json(log_file, [])
+    export_markdown([], markdown_file=md_file)
     return {"ok": True}, 200
+
+
+# ── Multi-user: API handlers ──────────────────────────────────────────────
+
+def handle_register(handler):
+    if not MULTI_USER:
+        response_json(handler, {"ok": False, "error": "多用户模式未启用"}, 400)
+        return
+    payload = read_json_body(handler)
+    username = (payload.get("username") or "").strip()
+    password = (payload.get("password") or "").strip()
+
+    if not username or not password:
+        response_json(handler, {"ok": False, "error": "用户名和密码不能为空"}, 400)
+        return
+    if not re.match(r'^[a-zA-Z0-9_一-鿿]{2,30}$', username):
+        response_json(handler, {"ok": False, "error": "用户名格式不正确（2-30位字母、数字、下划线或中文）"}, 400)
+        return
+    if len(password) < 4:
+        response_json(handler, {"ok": False, "error": "密码至少需要4位"}, 400)
+        return
+
+    users = load_users()
+    if username.lower() in (u.lower() for u in users):
+        response_json(handler, {"ok": False, "error": "用户名已存在"}, 409)
+        return
+
+    pw_hash, salt = hash_password(password)
+    is_first_user = len(users) == 0
+    users[username] = {
+        "password_hash": pw_hash,
+        "salt": salt,
+        "created_at": datetime.now().isoformat(timespec="seconds"),
+    }
+    save_users(users)
+    ensure_user_dir(username)
+
+    if is_first_user:
+        base = user_dir(username)
+        for src, name in [
+            (CONFIG_FILE, "models_config.json"),
+            (LOG_FILE, "api_dialogue_log.json"),
+            (MARKDOWN_FILE, "api_dialogue.md"),
+            (EXPORT_INDEX_FILE, "export_index.json"),
+        ]:
+            dst = base / name
+            if src.exists() and not dst.exists():
+                dst.write_bytes(src.read_bytes())
+
+    token = create_session(username)
+    set_session_cookie(handler, token)
+    response_json(handler, {"ok": True, "username": username})
+
+
+def handle_login(handler):
+    if not MULTI_USER:
+        response_json(handler, {"ok": False, "error": "多用户模式未启用"}, 400)
+        return
+    payload = read_json_body(handler)
+    username = (payload.get("username") or "").strip()
+    password = (payload.get("password") or "").strip()
+
+    if not username or not password:
+        response_json(handler, {"ok": False, "error": "请输入用户名和密码"}, 400)
+        return
+
+    users = load_users()
+    match = next((u for u in users if u.lower() == username.lower()), None)
+    if not match or not verify_password(password, users[match]["password_hash"], users[match]["salt"]):
+        if match is None:
+            hash_password(password)
+        response_json(handler, {"ok": False, "error": "用户名或密码错误"}, 401)
+        return
+
+    ensure_user_dir(match)
+    token = create_session(match)
+    set_session_cookie(handler, token)
+    response_json(handler, {"ok": True, "username": match})
+
+
+def handle_logout(handler):
+    if MULTI_USER:
+        cookies = parse_cookies(handler)
+        delete_session(cookies.get(SESSION_COOKIE, ""))
+    clear_session_cookie(handler)
+    response_json(handler, {"ok": True})
 
 
 class PanelHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         return
 
+    def _public_get_paths(self):
+        paths = {"/health", "/api/env-check", "/api/session"}
+        if MULTI_USER:
+            paths.update({"/api/login", "/api/register", "/api/logout"})
+        return paths
+
     def do_HEAD(self):
         path = urlparse(self.path).path
-        if path not in {"/health", "/api/env-check"} and not authorized(self):
+        if path not in self._public_get_paths() and not authorized(self):
             require_auth(self)
             return
         if path == "/":
@@ -477,7 +775,7 @@ class PanelHandler(BaseHTTPRequestHandler):
             self.send_header("Cache-Control", "no-store")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
-        elif path in {"/api/config", "/api/dialogue", "/api/status"}:
+        elif path in {"/api/config", "/api/dialogue", "/api/status", "/api/session"}:
             self.send_response(200)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Cache-Control", "no-store")
@@ -496,9 +794,15 @@ class PanelHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         path = urlparse(self.path).path
-        if path not in {"/health", "/api/env-check"} and not authorized(self):
+
+        # In multi-user mode, the main pages show the login overlay when not logged in
+        if path not in self._public_get_paths() and not authorized(self):
+            if MULTI_USER and path in {"/", "/lite"}:
+                response_html(self, HTML_TEMPLATE)
+                return
             require_auth(self)
             return
+
         if path == "/":
             response_html(self, HTML_TEMPLATE)
         elif path == "/lite":
@@ -513,9 +817,12 @@ class PanelHandler(BaseHTTPRequestHandler):
                 "try: http://127.0.0.1:5000/lite\n",
             )
         elif path == "/api/config":
-            response_json(self, public_config())
+            username = get_username(self)
+            response_json(self, public_config(username))
         elif path == "/api/dialogue":
-            messages = load_log()
+            username = get_username(self)
+            _cfg, log_file, _md, _exp = user_file_paths(username)
+            messages = load_log(log_file)
             response_json(
                 self,
                 {
@@ -525,7 +832,11 @@ class PanelHandler(BaseHTTPRequestHandler):
                 },
             )
         elif path == "/api/status":
-            response_json(self, current_status())
+            username = get_username(self)
+            response_json(self, current_status(username))
+        elif path == "/api/session":
+            username = get_username(self)
+            response_json(self, {"username": username})
         elif path == "/api/env-check":
             response_json(
                 self,
@@ -544,40 +855,61 @@ class PanelHandler(BaseHTTPRequestHandler):
                 },
             )
         elif path == "/export/markdown":
-            response_download(self, FOLDER / "api_dialogue.md", export_filename("md"), "text/markdown; charset=utf-8")
+            username = get_username(self)
+            _cfg, _log, md_file, _exp = user_file_paths(username)
+            response_download(self, md_file, export_filename("md", username), "text/markdown; charset=utf-8")
         elif path == "/export/json":
-            response_download(self, LOG_FILE, export_filename("json"), "application/json; charset=utf-8")
+            username = get_username(self)
+            _cfg, log_file, _md, _exp = user_file_paths(username)
+            response_download(self, log_file, export_filename("json", username), "application/json; charset=utf-8")
         elif path == "/export/all":
-            response_export_bundle(self)
+            username = get_username(self)
+            response_export_bundle(self, username)
         else:
             response_json(self, {"error": "Not found"}, 404)
 
     def do_POST(self):
+        path = urlparse(self.path).path
+
+        # Multi-user public POST endpoints (no auth required)
+        if MULTI_USER:
+            if path == "/api/register":
+                handle_register(self)
+                return
+            elif path == "/api/login":
+                handle_login(self)
+                return
+            elif path == "/api/logout":
+                handle_logout(self)
+                return
+
         if not authorized(self):
             require_auth(self)
             return
-        path = urlparse(self.path).path
+
+        username = get_username(self)
         try:
             payload = read_json_body(self)
             if path == "/api/config":
-                response_json(self, save_config_from_payload(payload))
+                response_json(self, save_config_from_payload(payload, username))
             elif path == "/api/start":
-                data, status = start_dialogue(payload)
+                data, status = start_dialogue(payload, username)
                 response_json(self, data, status)
             elif path == "/api/stop":
-                data, status = stop_dialogue()
+                data, status = stop_dialogue(username)
                 response_json(self, data, status)
             elif path == "/api/clear":
-                data, status = clear_dialogue()
+                data, status = clear_dialogue(username)
                 response_json(self, data, status)
             elif path == "/api/interject":
                 text = (payload.get("content") or "").strip()
                 if not text:
                     response_json(self, {"ok": False, "error": "插话内容不能为空"}, 400)
                     return
-                log = load_log()
+                _cfg, log_file, md_file, _exp = user_file_paths(username)
+                log = load_log(log_file)
                 append_entry(log, "user", text)
-                save_log(log)
+                save_log(log, log_file=log_file, markdown_file=md_file)
                 response_json(self, {"ok": True})
             else:
                 response_json(self, {"error": "Not found"}, 404)
@@ -1046,15 +1378,87 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       font-weight: 700;
     }
     .export-options a:hover { background: #eef2f6; }
+    /* ── Login overlay ── */
+    .login-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(15, 23, 42, 0.55);
+      z-index: 100;
+      align-items: center;
+      justify-content: center;
+    }
+    .login-overlay.show { display: flex; }
+    .login-card {
+      background: var(--panel);
+      border-radius: 12px;
+      padding: 32px 28px;
+      width: 100%;
+      max-width: 380px;
+      box-shadow: 0 20px 50px rgba(15, 23, 42, 0.25);
+    }
+    .login-card h2 { margin: 0 0 20px; font-size: 20px; text-align: center; }
+    .login-tabs {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0;
+      margin-bottom: 20px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .login-tab {
+      padding: 8px;
+      text-align: center;
+      cursor: pointer;
+      font-weight: 700;
+      font-size: 14px;
+      background: #f4f6f8;
+      color: var(--muted);
+      border: 0;
+    }
+    .login-tab.active { background: var(--accent); color: #fff; }
+    .login-card label { margin-bottom: 12px; }
+    .login-card .error { color: var(--danger); font-size: 13px; min-height: 20px; margin-bottom: 12px; }
+    .login-card button { width: 100%; }
+    .login-confirm { display: none; }
+    .login-card.register .login-confirm { display: grid; }
+    .login-card.register .login-only { display: none; }
+    .user-info {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+    }
+    .user-info .username { font-weight: 700; color: var(--accent); }
   </style>
 </head>
 <body>
+  <!-- ── Login overlay (shown when not authenticated in multi-user mode) ── -->
+  <div id="loginOverlay" class="login-overlay">
+    <div class="login-card" id="loginCard">
+      <h2 id="loginTitle">登录</h2>
+      <div class="login-tabs">
+        <button class="login-tab active" id="tabLogin" onclick="switchAuthTab('login')">登录</button>
+        <button class="login-tab" id="tabRegister" onclick="switchAuthTab('register')">注册</button>
+      </div>
+      <label>用户名 <input id="loginUsername" type="text" autocomplete="username" /></label>
+      <label>密码 <input id="loginPassword" type="password" autocomplete="current-password" /></label>
+      <label class="login-confirm">确认密码 <input id="loginPasswordConfirm" type="password" autocomplete="new-password" /></label>
+      <div class="error" id="loginError"></div>
+      <button id="loginSubmitBtn" onclick="handleAuthSubmit()">登录</button>
+    </div>
+  </div>
   <header>
     <h1>多 AI 对话控制台</h1>
     <div class="status">
       <span><i id="runDot" class="dot"></i> <span id="runText">待机</span></span>
       <span id="currentModel">当前模型：-</span>
       <span id="progressText">进度：0/0</span>
+    </div>
+    <div class="user-info" id="userSection" style="display:none;">
+      <span class="username" id="currentUser"></span>
+      <button class="secondary tool-button" onclick="logout()" style="padding:4px 10px;font-size:12px;">登出</button>
     </div>
   </header>
   <main>
@@ -1179,12 +1583,111 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     let hasMessages = false;
     let stopRequestedByUser = false;
     let stoppedNoticeUntil = 0;
+    let sessionUsername = null;
+    let authMode = 'login';
+    let pollTimer = null;
+
+    // ── Auth ──
+
+    async function checkSession() {
+        try {
+            const resp = await fetch('/api/session');
+            const data = await resp.json();
+            if (data.username) {
+                sessionUsername = data.username;
+                document.getElementById('loginOverlay').classList.remove('show');
+                document.getElementById('userSection').style.display = '';
+                document.getElementById('currentUser').textContent = data.username;
+                return true;
+            }
+        } catch(e) {}
+        document.getElementById('loginOverlay').classList.add('show');
+        return false;
+    }
+
+    function switchAuthTab(mode) {
+        authMode = mode;
+        document.getElementById('tabLogin').classList.toggle('active', mode === 'login');
+        document.getElementById('tabRegister').classList.toggle('active', mode === 'register');
+        document.getElementById('loginTitle').textContent = mode === 'login' ? '登录' : '注册';
+        document.getElementById('loginSubmitBtn').textContent = mode === 'login' ? '登录' : '注册';
+        document.getElementById('loginCard').classList.toggle('register', mode === 'register');
+        document.getElementById('loginError').textContent = '';
+    }
+
+    async function handleAuthSubmit() {
+        const username = document.getElementById('loginUsername').value.trim();
+        const password = document.getElementById('loginPassword').value;
+        const errorEl = document.getElementById('loginError');
+        errorEl.textContent = '';
+
+        if (!username || !password) {
+            errorEl.textContent = '请填写用户名和密码';
+            return;
+        }
+
+        if (authMode === 'register') {
+            const confirm = (document.getElementById('loginPasswordConfirm').value || '');
+            if (password !== confirm) {
+                errorEl.textContent = '两次密码不一致';
+                return;
+            }
+            if (password.length < 4) {
+                errorEl.textContent = '密码至少需要4位';
+                return;
+            }
+        }
+
+        const endpoint = authMode === 'login' ? '/api/login' : '/api/register';
+        try {
+            const resp = await fetch(endpoint, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({username, password})
+            });
+            const data = await resp.json();
+            if (!data.ok) throw new Error(data.error);
+            sessionUsername = data.username;
+            document.getElementById('loginOverlay').classList.remove('show');
+            document.getElementById('userSection').style.display = '';
+            document.getElementById('currentUser').textContent = data.username;
+            loadConfig().then(refreshAll).then(startPolling);
+        } catch(e) {
+            errorEl.textContent = e.message;
+        }
+    }
+
+    async function logout() {
+        await fetch('/api/logout', {method: 'POST'});
+        sessionUsername = null;
+        stopPolling();
+        document.getElementById('loginOverlay').classList.add('show');
+        document.getElementById('userSection').style.display = 'none';
+        document.getElementById('messages').innerHTML = '<div class="empty">请先登录。</div>';
+        document.getElementById('runDot').classList.remove('running');
+        document.getElementById('runText').textContent = '待机';
+        document.getElementById('currentModel').textContent = '当前模型：-';
+        document.getElementById('progressText').textContent = '进度：0/0';
+    }
+
+    function startPolling() {
+        if (pollTimer) return;
+        pollTimer = setInterval(refreshAll, 2000);
+    }
+
+    function stopPolling() {
+        if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+    }
 
     async function api(path, options = {}) {
       const response = await fetch(path, {
         headers: { 'Content-Type': 'application/json' },
         ...options
       });
+      if (response.status === 401) {
+        checkSession();
+        throw new Error('请先登录');
+      }
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || '请求失败');
       return data;
@@ -1509,9 +2012,19 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       await Promise.all([refreshStatus(), refreshDialogue()]);
     }
 
+    // Add Enter key login support
+    const loginPassword = document.getElementById('loginPassword');
+    const loginPasswordConfirm = document.getElementById('loginPasswordConfirm');
+    if (loginPassword) loginPassword.addEventListener('keydown', function(e) { if (e.key === 'Enter') handleAuthSubmit(); });
+    if (loginPasswordConfirm) loginPasswordConfirm.addEventListener('keydown', function(e) { if (e.key === 'Enter') handleAuthSubmit(); });
+
     bindKeyboardShortcuts();
-    loadConfig().then(refreshAll);
-    setInterval(refreshAll, 2000);
+    checkSession().then(function(loggedIn) {
+        if (loggedIn) {
+            loadConfig().then(refreshAll).then(startPolling);
+        }
+    });
+    // The old setInterval is replaced by startPolling() which only runs when logged in
   </script>
 </body>
 </html>
@@ -1568,9 +2081,40 @@ LITE_TEMPLATE = r"""<!DOCTYPE html>
     .meta { color: #64748b; font-size: 12px; margin-bottom: 5px; }
     .msg { white-space: pre-wrap; line-height: 1.45; }
     .muted { color: #64748b; font-size: 13px; }
+    /* ── Login overlay ── */
+    .login-overlay {
+      display: none;
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.5); z-index: 100;
+      align-items: center; justify-content: center;
+    }
+    .login-overlay.show { display: flex; }
+    .login-card {
+      background: #fff; border-radius: 8px; padding: 24px;
+      max-width: 320px; width: 100%;
+    }
+    .login-card h2 { margin: 0 0 16px; font-size: 18px; text-align: center; }
+    .login-card input { margin-bottom: 10px; display: block; }
+    .login-card button { width: 100%; margin-top: 6px; }
+    .login-card .secondary { background: #e8edf3; color: #1f2937; }
+    .login-error { color: #b42318; font-size: 13px; margin-bottom: 8px; }
+    .login-confirm { display: none; }
+    .login-card.register .login-confirm { display: block; }
+    .login-card.register .login-only { display: none; }
   </style>
 </head>
 <body>
+  <div class="login-overlay show" id="loginOverlay">
+    <div class="login-card" id="loginCard">
+      <h2 id="loginTitle">登录</h2>
+      <input id="loginUsername" type="text" placeholder="用户名" autocomplete="username" />
+      <input id="loginPassword" type="password" placeholder="密码" autocomplete="current-password" />
+      <input class="login-confirm" id="loginPasswordConfirm" type="password" placeholder="确认密码" autocomplete="new-password" />
+      <div class="login-error" id="loginError"></div>
+      <button id="loginSubmitBtn" onclick="handleAuthSubmit()">登录</button>
+      <button class="secondary" onclick="switchAuthTab()" style="margin-top:4px;" id="switchBtn">或者注册新账号</button>
+    </div>
+  </div>
   <header>
     <h1>AI Panel Lite</h1>
     <div class="muted" id="status">连接中...</div>
@@ -1585,11 +2129,63 @@ LITE_TEMPLATE = r"""<!DOCTYPE html>
     <div id="messages" class="muted">载入中...</div>
   </main>
   <script>
+    let liteSessionUser = null;
+    let liteAuthMode = 'login';
+    let litePoll = null;
+
+    async function checkSession() {
+        try {
+            const resp = await fetch('/api/session');
+            const data = await resp.json();
+            if (data.username) {
+                liteSessionUser = data.username;
+                document.getElementById('loginOverlay').classList.remove('show');
+                return true;
+            }
+        } catch(e) {}
+        document.getElementById('loginOverlay').classList.add('show');
+        return false;
+    }
+
+    function switchAuthTab() {
+        liteAuthMode = liteAuthMode === 'login' ? 'register' : 'login';
+        document.getElementById('loginTitle').textContent = liteAuthMode === 'login' ? '登录' : '注册';
+        document.getElementById('loginSubmitBtn').textContent = liteAuthMode === 'login' ? '登录' : '注册';
+        document.getElementById('switchBtn').textContent = liteAuthMode === 'login' ? '或者注册新账号' : '返回登录';
+        document.getElementById('loginCard').classList.toggle('register', liteAuthMode === 'register');
+        document.getElementById('loginError').textContent = '';
+    }
+
+    async function handleAuthSubmit() {
+        const username = document.getElementById('loginUsername').value.trim();
+        const password = document.getElementById('loginPassword').value;
+        if (!username || !password) { document.getElementById('loginError').textContent = '请填写用户名和密码'; return; }
+        if (liteAuthMode === 'register') {
+            const confirm = document.getElementById('loginPasswordConfirm').value || '';
+            if (password !== confirm) { document.getElementById('loginError').textContent = '两次密码不一致'; return; }
+            if (password.length < 4) { document.getElementById('loginError').textContent = '密码至少需要4位'; return; }
+        }
+        const endpoint = liteAuthMode === 'login' ? '/api/login' : '/api/register';
+        try {
+            const resp = await fetch(endpoint, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({username,password})});
+            const data = await resp.json();
+            if (!data.ok) throw new Error(data.error);
+            liteSessionUser = data.username;
+            document.getElementById('loginOverlay').classList.remove('show');
+            refreshAll();
+            if (!litePoll) litePoll = setInterval(refreshAll, 3000);
+        } catch(e) { document.getElementById('loginError').textContent = e.message; }
+    }
+
     async function api(path, options = {}) {
       const response = await fetch(path, {
         headers: { 'Content-Type': 'application/json' },
         ...options
       });
+      if (response.status === 401) {
+        checkSession();
+        throw new Error('请先登录');
+      }
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || '请求失败');
       return data;
@@ -1631,10 +2227,19 @@ LITE_TEMPLATE = r"""<!DOCTYPE html>
       await refreshAll();
     }
 
-    refreshAll().catch(error => {
-      document.getElementById('status').textContent = error.message;
+    const _lp = document.getElementById('loginPassword');
+    const _lpc = document.getElementById('loginPasswordConfirm');
+    if (_lp) _lp.addEventListener('keydown', function(e) { if (e.key === 'Enter') handleAuthSubmit(); });
+    if (_lpc) _lpc.addEventListener('keydown', function(e) { if (e.key === 'Enter') handleAuthSubmit(); });
+
+    checkSession().then(function(loggedIn) {
+        if (loggedIn) {
+            refreshAll().catch(function(error) {
+                document.getElementById('status').textContent = error.message;
+            });
+            litePoll = setInterval(refreshAll, 3000);
+        }
     });
-    setInterval(refreshAll, 3000);
   </script>
 </body>
 </html>
@@ -1644,10 +2249,43 @@ LITE_TEMPLATE = r"""<!DOCTYPE html>
 def main():
     load_dotenv(FOLDER / ".env")
     ensure_config()
+
+    if MULTI_USER:
+        if not USERS_FILE.exists():
+            users = {}
+            existing_user, existing_pass = panel_credentials()
+            if existing_pass:
+                pw_hash, salt = hash_password(existing_pass)
+                users[existing_user] = {
+                    "password_hash": pw_hash,
+                    "salt": salt,
+                    "created_at": datetime.now().isoformat(timespec="seconds"),
+                }
+            save_users(users)
+            if existing_pass:
+                base = user_dir(existing_user)
+                base.mkdir(parents=True, exist_ok=True)
+                for src, name in [
+                    (CONFIG_FILE, "models_config.json"),
+                    (LOG_FILE, "api_dialogue_log.json"),
+                    (MARKDOWN_FILE, "api_dialogue.md"),
+                    (EXPORT_INDEX_FILE, "export_index.json"),
+                ]:
+                    if src.exists():
+                        dst = base / name
+                        dst.write_bytes(src.read_bytes())
+            print(f"[multi-user] Initialized. Users: {list(users.keys()) or '(none yet)'}")
+        else:
+            sessions = load_sessions()
+            save_sessions(sessions)
+            print(f"[multi-user] Loaded {len(load_users())} user(s), {len(sessions)} active session(s)")
+
     server = ThreadingHTTPServer((HOST, PORT), PanelHandler)
     print("=" * 50)
     print("多 AI 对话控制台")
     print("=" * 50)
+    if MULTI_USER:
+        print("多用户模式已启用")
     print("打开浏览器访问:")
     for url in access_urls(HOST, PORT):
         label = "本机" if "127.0.0.1" in url else "手机/局域网"

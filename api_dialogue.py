@@ -139,23 +139,27 @@ def save_json(path, data):
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 
-def ensure_config():
-    if not CONFIG_FILE.exists():
-        save_json(CONFIG_FILE, DEFAULT_CONFIG)
-    return load_json(CONFIG_FILE, DEFAULT_CONFIG)
+def ensure_config(config_file=None):
+    cf = config_file or CONFIG_FILE
+    if not cf.exists():
+        save_json(cf, DEFAULT_CONFIG)
+    return load_json(cf, DEFAULT_CONFIG)
 
 
-def load_log():
-    return load_json(LOG_FILE, [])
+def load_log(log_file=None):
+    return load_json(log_file or LOG_FILE, [])
 
 
-def save_log(log):
-    save_json(LOG_FILE, log)
-    export_markdown(log)
+def save_log(log, log_file=None, markdown_file=None):
+    lf = log_file or LOG_FILE
+    mf = markdown_file or MARKDOWN_FILE
+    save_json(lf, log)
+    export_markdown(log, markdown_file=mf)
 
 
-def export_markdown(log):
-    with open(MARKDOWN_FILE, "w", encoding="utf-8") as f:
+def export_markdown(log, markdown_file=None):
+    mf = markdown_file or MARKDOWN_FILE
+    with open(mf, "w", encoding="utf-8") as f:
         f.write("# 多 AI API 对话记录\n\n")
         f.write(f"_最后更新: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}_\n\n")
         for index, entry in enumerate(log, 1):
