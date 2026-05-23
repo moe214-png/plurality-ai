@@ -1,0 +1,4 @@
+[build]
+  builder = "nixpacks"
+  [build.nixpacks]
+    # Python 项目，从 Procfile 启动
