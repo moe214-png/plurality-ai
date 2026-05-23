@@ -1449,6 +1449,13 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     .login-confirm { display: none; }
     .login-card.register .login-confirm { display: grid; }
     .login-card.register .login-only { display: none; }
+    .privacy-note {
+      text-align: center;
+      font-size: 11px;
+      color: var(--muted);
+      margin: 16px 0 0;
+      opacity: 0.75;
+    }
     .user-info {
       display: inline-flex;
       align-items: center;
@@ -1473,6 +1480,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       <label class="login-confirm">邀请码 <input id="loginInviteCode" type="text" /></label>
       <div class="error" id="loginError"></div>
       <button id="loginSubmitBtn" onclick="handleAuthSubmit()">登录</button>
+      <p class="privacy-note">你的聊天记录仅自己可见，开发者不会、也无法查看。</p>
     </div>
   </div>
   <header>
@@ -1985,7 +1993,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         typingAvatar.innerHTML = isImageAvatar(style.avatar)
           ? `<img src="${escapeHtml(style.avatar)}" alt="" />`
           : escapeHtml((style.avatar || 'AI').slice(0, 4));
-        typingText.textContent = waiting ? '发言等待中' : `${model} 正在输入`;
+        typingText.textContent = waiting ? '等待AI发言中' : `${model} 正在输入`;
         typing.classList.toggle('waiting', waiting);
         typing.classList.add('show');
       } else {
@@ -2111,6 +2119,7 @@ LITE_TEMPLATE = r"""<!DOCTYPE html>
     .login-confirm { display: none; }
     .login-card.register .login-confirm { display: block; }
     .login-card.register .login-only { display: none; }
+    .privacy-note { text-align: center; font-size: 11px; color: #888; margin: 14px 0 0; }
   </style>
 </head>
 <body>
@@ -2124,6 +2133,7 @@ LITE_TEMPLATE = r"""<!DOCTYPE html>
       <div class="login-error" id="loginError"></div>
       <button id="loginSubmitBtn" onclick="handleAuthSubmit()">登录</button>
       <button class="secondary" onclick="switchAuthTab()" style="margin-top:4px;" id="switchBtn">或者注册新账号</button>
+      <p class="privacy-note">你的聊天记录仅自己可见，开发者不会查看。</p>
     </div>
   </div>
   <header>
