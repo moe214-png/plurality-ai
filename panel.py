@@ -683,10 +683,18 @@ def handle_register(handler):
     payload = read_json_body(handler)
     username = (payload.get("username") or "").strip()
     password = (payload.get("password") or "").strip()
+    invite = (payload.get("invite") or "").strip()
 
     if not username or not password:
         response_json(handler, {"ok": False, "error": "用户名和密码不能为空"}, 400)
         return
+
+    # Invitation code check (only if PANEL_INVITE_CODE is set)
+    required_invite = os.environ.get("PANEL_INVITE_CODE", "").strip()
+    if required_invite and invite != required_invite:
+        response_json(handler, {"ok": False, "error": "邀请码不正确"}, 400)
+        return
+
     if not re.match(r'^[a-zA-Z0-9_一-鿿]{2,30}$', username):
         response_json(handler, {"ok": False, "error": f"用户名格式不正确'（{username}'——2-30位字母、数字、下划线或中文）"}, 400)
         return
@@ -1462,6 +1470,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       <label>用户名 <input id="loginUsername" type="text" autocomplete="username" /></label>
       <label>密码 <input id="loginPassword" type="password" autocomplete="current-password" /></label>
       <label class="login-confirm">确认密码 <input id="loginPasswordConfirm" type="password" autocomplete="new-password" /></label>
+      <label class="login-confirm">邀请码 <input id="loginInviteCode" type="text" /></label>
       <div class="error" id="loginError"></div>
       <button id="loginSubmitBtn" onclick="handleAuthSubmit()">登录</button>
     </div>
@@ -1656,11 +1665,12 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         }
 
         const endpoint = authMode === 'login' ? '/api/login' : '/api/register';
+        const invite = (document.getElementById('loginInviteCode')?.value || '').trim();
         try {
             const resp = await fetch(endpoint, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({username, password})
+                body: JSON.stringify({username, password, invite})
             });
             const data = await resp.json();
             if (!data.ok) throw new Error(data.error);
@@ -2127,6 +2137,7 @@ LITE_TEMPLATE = r"""<!DOCTYPE html>
       <input id="loginUsername" type="text" placeholder="用户名" autocomplete="username" />
       <input id="loginPassword" type="password" placeholder="密码" autocomplete="current-password" />
       <input class="login-confirm" id="loginPasswordConfirm" type="password" placeholder="确认密码" autocomplete="new-password" />
+      <input class="login-confirm" id="loginInviteCode" type="text" placeholder="邀请码" />
       <div class="login-error" id="loginError"></div>
       <button id="loginSubmitBtn" onclick="handleAuthSubmit()">登录</button>
       <button class="secondary" onclick="switchAuthTab()" style="margin-top:4px;" id="switchBtn">或者注册新账号</button>
@@ -2184,7 +2195,8 @@ LITE_TEMPLATE = r"""<!DOCTYPE html>
         }
         const endpoint = liteAuthMode === 'login' ? '/api/login' : '/api/register';
         try {
-            const resp = await fetch(endpoint, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({username,password})});
+            const invite = document.getElementById('loginInviteCode')?.value?.trim() || '';
+            const resp = await fetch(endpoint, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({username,password,invite})});
             const data = await resp.json();
             if (!data.ok) throw new Error(data.error);
             liteSessionUser = data.username;
