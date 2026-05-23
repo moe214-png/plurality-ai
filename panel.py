@@ -758,7 +758,7 @@ class PanelHandler(BaseHTTPRequestHandler):
         return
 
     def _public_get_paths(self):
-        paths = {"/health", "/api/env-check", "/api/session"}
+        paths = {"/health", "/api/env-check", "/api/session", "/api/users"}
         if MULTI_USER:
             paths.update({"/api/login", "/api/register", "/api/logout"})
         return paths
@@ -775,7 +775,7 @@ class PanelHandler(BaseHTTPRequestHandler):
             self.send_header("Cache-Control", "no-store")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
-        elif path in {"/api/config", "/api/dialogue", "/api/status", "/api/session"}:
+        elif path in {"/api/config", "/api/dialogue", "/api/status", "/api/session", "/api/users"}:
             self.send_response(200)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Cache-Control", "no-store")
@@ -837,6 +837,12 @@ class PanelHandler(BaseHTTPRequestHandler):
         elif path == "/api/session":
             username = get_username(self)
             response_json(self, {"username": username})
+        elif path == "/api/users":
+            if MULTI_USER:
+                users = load_users()
+                response_json(self, {"count": len(users), "usernames": sorted(users.keys())})
+            else:
+                response_json(self, {"count": 0, "usernames": [], "note": "多用户模式未启用"})
         elif path == "/api/env-check":
             response_json(
                 self,
