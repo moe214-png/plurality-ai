@@ -1025,18 +1025,20 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       .row { grid-template-columns: 1fr; }
       .buttons {
         display: grid;
-        grid-template-columns: 1fr 1fr;
+        grid-template-columns: 1fr 1fr 1fr;
+        gap: 6px;
         order: -1;
         position: sticky;
         top: 0;
         z-index: 8;
         margin: -4px -4px 0;
-        padding: 8px;
+        padding: 6px;
         border: 1px solid var(--line);
         border-radius: 8px;
         background: var(--panel);
         box-shadow: 0 8px 18px rgba(15, 23, 42, .1);
       }
+      .buttons button { padding: 8px 6px; font-size: 12px; }
       .settings-grid { grid-template-columns: 1fr; }
       .mode-row { grid-template-columns: 1fr; }
       button { min-height: 42px; }
@@ -1565,7 +1567,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         </label>
       </div>
       <div class="buttons">
-        <button class="secondary tool-button" id="continueBtn" onclick="continueDialogue()"><span class="icon">↻</span><span>无输入继续</span></button>
+        <button class="secondary tool-button" id="continueBtn" onclick="continueDialogue()"><span class="icon">↻</span><span>继续</span></button>
         <button class="secondary tool-button" id="stopBtn" onclick="stopDialogue()"><span class="icon">■</span><span id="stopLabel">停止</span></button>
         <button class="danger tool-button" onclick="clearDialogue()"><span class="icon">×</span><span>清空</span></button>
       </div>
