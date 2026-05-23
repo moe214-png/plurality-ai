@@ -1461,6 +1461,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       align-items: center;
       gap: 8px;
       font-size: 13px;
+      margin-left: auto;
+      white-space: nowrap;
     }
     .user-info .username { font-weight: 700; color: var(--accent); }
   </style>
@@ -1489,10 +1491,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       <span><i id="runDot" class="dot"></i> <span id="runText">待机</span></span>
       <span id="currentModel">当前模型：-</span>
       <span id="progressText">进度：0/0</span>
-    </div>
-    <div class="user-info" id="userSection" style="display:none;">
-      <span class="username" id="currentUser"></span>
-      <button class="secondary tool-button" onclick="logout()" style="padding:4px 10px;font-size:12px;">登出</button>
+      <span class="user-info" id="userSection" style="display:none;">
+        <span class="username" id="currentUser"></span>
+        <button class="secondary tool-button" onclick="logout()" style="padding:4px 10px;font-size:12px;">登出</button>
+      </span>
     </div>
   </header>
   <main>
