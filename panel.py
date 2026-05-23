@@ -689,7 +689,7 @@ def handle_register(handler):
 
     users = load_users()
     if username.lower() in (u.lower() for u in users):
-        response_json(handler, {"ok": False, "error": "用户名已存在"}, 409)
+        response_json(handler, {"ok": False, "error": f"用户名已存在（当前已有 {len(users)} 位用户）"}, 409)
         return
 
     pw_hash, salt = hash_password(password)
