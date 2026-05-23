@@ -466,10 +466,10 @@ class PanelHandler(BaseHTTPRequestHandler):
         return
 
     def do_HEAD(self):
-        if not authorized(self):
+        path = urlparse(self.path).path
+        if path not in {"/health", "/api/env-check"} and not authorized(self):
             require_auth(self)
             return
-        path = urlparse(self.path).path
         if path == "/":
             body = HTML_TEMPLATE.encode("utf-8")
             self.send_response(200)
@@ -495,19 +495,20 @@ class PanelHandler(BaseHTTPRequestHandler):
             self.end_headers()
 
     def do_GET(self):
-        if not authorized(self):
+        path = urlparse(self.path).path
+        if path not in {"/health", "/api/env-check"} and not authorized(self):
             require_auth(self)
             return
-        path = urlparse(self.path).path
         if path == "/":
             response_html(self, HTML_TEMPLATE)
         elif path == "/lite":
             response_html(self, LITE_TEMPLATE)
-        elif path in {"/health", "/debug"}:
+        elif path == "/health":
+            response_text(self, "ok")
+        elif path == "/debug":
             response_text(
                 self,
-                "ok\n"
-                "panel server is running\n"
+                "ok\npanel server is running\n"
                 f"time: {datetime.now().isoformat(timespec='seconds')}\n"
                 "try: http://127.0.0.1:5000/lite\n",
             )
@@ -525,6 +526,22 @@ class PanelHandler(BaseHTTPRequestHandler):
             )
         elif path == "/api/status":
             response_json(self, current_status())
+        elif path == "/api/env-check":
+            response_json(
+                self,
+                {
+                    "PANEL_USER_set": bool(os.environ.get("PANEL_USER", "").strip()),
+                    "PANEL_PASSWORD_set": bool(os.environ.get("PANEL_PASSWORD", "").strip()),
+                    "CLAUDE_API_KEY_set": bool(os.environ.get("CLAUDE_API_KEY", "").strip()),
+                    "OPENAI_API_KEY_set": bool(os.environ.get("OPENAI_API_KEY", "").strip()),
+                    "DEEPSEEK_API_KEY_set": bool(os.environ.get("DEEPSEEK_API_KEY", "").strip()),
+                    "GEMINI_API_KEY_set": bool(os.environ.get("GEMINI_API_KEY", "").strip()),
+                    "PORT": os.environ.get("PORT", ""),
+                    "all_env_keys": sorted(k for k in os.environ if any(
+                        keyword in k.lower() for keyword in ["panel", "api", "key", "claude", "openai", "deepseek", "gemini", "chatgpt"]
+                    )),
+                },
+            )
         elif path == "/export/markdown":
             response_download(self, FOLDER / "api_dialogue.md", export_filename("md"), "text/markdown; charset=utf-8")
         elif path == "/export/json":
