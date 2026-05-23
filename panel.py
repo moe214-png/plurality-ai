@@ -1046,10 +1046,6 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         min-height: 480px;
         max-height: none;
       }
-      .chat-toolbar {
-        align-items: flex-start;
-        flex-direction: column;
-      }
       .interject { grid-template-columns: 1fr; }
       .interject button { width: 100%; }
     }
@@ -1220,8 +1216,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       display: flex;
       justify-content: space-between;
       align-items: center;
-      gap: 12px;
-      flex-wrap: wrap;
+      gap: 8px;
+      flex-wrap: nowrap;
     }
     .messages {
       overflow: auto;
@@ -1582,15 +1578,13 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     <section class="chat">
       <div class="chat-toolbar">
         <strong>对话记录</strong>
-        <div class="status">
-          <div class="export-menu" id="exportMenu">
-            <button class="secondary tool-button" type="button" onclick="toggleExportMenu(event)"><span class="icon">⇩</span><span>导出聊天记录</span></button>
-            <div class="export-options">
-              <a href="/export/markdown" onclick="closeExportMenu()"><span class="icon">MD</span><span>Markdown</span></a>
-              <a href="/export/json" onclick="closeExportMenu()"><span class="icon">{}</span><span>JSON</span></a>
-            </div>
+        <span class="notice" id="lastUpdate">最后更新：-</span>
+        <div class="export-menu" id="exportMenu">
+          <button class="secondary tool-button" type="button" onclick="toggleExportMenu(event)"><span class="icon">⇩</span><span>导出</span></button>
+          <div class="export-options">
+            <a href="/export/markdown" onclick="closeExportMenu()"><span class="icon">MD</span><span>Markdown</span></a>
+            <a href="/export/json" onclick="closeExportMenu()"><span class="icon">{}</span><span>JSON</span></a>
           </div>
-          <span class="notice" id="lastUpdate">最后更新：-</span>
         </div>
       </div>
       <div id="messages" class="messages">
