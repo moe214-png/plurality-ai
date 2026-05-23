@@ -537,6 +537,7 @@ class PanelHandler(BaseHTTPRequestHandler):
                     "DEEPSEEK_API_KEY_set": bool(os.environ.get("DEEPSEEK_API_KEY", "").strip()),
                     "GEMINI_API_KEY_set": bool(os.environ.get("GEMINI_API_KEY", "").strip()),
                     "PORT": os.environ.get("PORT", ""),
+                    "total_env_count": len(os.environ),
                     "all_env_keys": sorted(k for k in os.environ if any(
                         keyword in k.lower() for keyword in ["panel", "api", "key", "claude", "openai", "deepseek", "gemini", "chatgpt"]
                     )),
