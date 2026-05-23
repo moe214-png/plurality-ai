@@ -1,0 +1,8 @@
+.env
+__pycache__/
+*.pyc
+api_dialogue_log.json
+api_dialogue.md
+export_index.json
+panel_server.err.log
+panel_server.out.log
