@@ -4,5 +4,6 @@ __pycache__/
 api_dialogue_log.json
 api_dialogue.md
 export_index.json
+users.json
 panel_server.err.log
 panel_server.out.log
