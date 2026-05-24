@@ -1789,6 +1789,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     let config = null;
     let hasMessages = false;
     let stickToBottomOnce = false;
+    let userScrollLock = false;
+    let lastMessagesScrollTop = 0;
     let stopRequestedByUser = false;
     let stoppedNoticeUntil = 0;
     let sessionUsername = null;
@@ -2174,6 +2176,20 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         }
       });
 
+      const messagesRoot = document.getElementById('messages');
+      messagesRoot.addEventListener('scroll', () => {
+        const distanceFromBottom = messagesRoot.scrollHeight - messagesRoot.scrollTop - messagesRoot.clientHeight;
+        const movedUp = messagesRoot.scrollTop < lastMessagesScrollTop - 2;
+        if (movedUp || distanceFromBottom > 96) {
+          userScrollLock = true;
+          stickToBottomOnce = false;
+        }
+        if (distanceFromBottom < 24) {
+          userScrollLock = false;
+        }
+        lastMessagesScrollTop = messagesRoot.scrollTop;
+      }, { passive: true });
+
     }
 
     async function refreshStatus() {
@@ -2229,9 +2245,11 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       document.getElementById('lastUpdate').textContent = `最后更新：${new Date(data.last_update).toLocaleTimeString('zh-CN')}`;
       const root = document.getElementById('messages');
       const distanceFromBottom = root.scrollHeight - root.scrollTop - root.clientHeight;
-      const wasNearBottom = distanceFromBottom < 72;
+      const wasNearBottom = distanceFromBottom < 72 && !userScrollLock;
       if (!data.messages.length) {
         root.innerHTML = '<div class="empty">还没有对话。输入提示词后点击开始。</div>';
+        userScrollLock = false;
+        lastMessagesScrollTop = root.scrollTop;
         return;
       }
       root.innerHTML = data.messages.map(message => `
@@ -2246,10 +2264,11 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           </div>
         </article>
       `).join('');
-      if (stickToBottomOnce || wasNearBottom) {
+      if ((stickToBottomOnce && !userScrollLock) || wasNearBottom) {
         root.scrollTop = root.scrollHeight;
       }
       stickToBottomOnce = false;
+      lastMessagesScrollTop = root.scrollTop;
     }
 
     async function refreshAll() {
