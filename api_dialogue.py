@@ -48,7 +48,7 @@ DEFAULT_CONFIG = {
     "natural_pick_strategy": "sample",
     "natural_judge_model_id": "deepseek",
     "natural_check_tokens": 80,
-    "natural_fallback_seconds": 2.5,
+    "natural_fallback_seconds": 4.5,
     "max_consecutive_turns": 2,
     "natural_balance_enabled": True,
     "natural_balance_window": 8,
@@ -676,22 +676,25 @@ def mentioned_models(config, log, lookback=2):
     candidates = enabled_models(config)
     if not candidates:
         return []
-    recent_user_messages = [
+    recent_messages = [
         item
         for item in reversed(log)
-        if item.get("role") == "user" and (item.get("content") or "").strip()
+        if (item.get("content") or "").strip()
     ][:lookback]
-    if not recent_user_messages:
+    if not recent_messages:
         return []
 
     mentions = []
     seen_ids = set()
-    # Newer user messages win; within the same message, earlier mentions win.
-    for item in recent_user_messages:
+    # Newer messages win; within the same message, earlier mentions win.
+    for item in recent_messages:
         text = item.get("content", "")
         lowered = text.lower()
+        speaker_id = item.get("model_id")
         found = []
         for model in candidates:
+            if speaker_id and speaker_id == model.get("id"):
+                continue
             positions = []
             for alias in model_mention_aliases(model):
                 pos = lowered.find(alias.lower())
@@ -772,9 +775,9 @@ def choose_natural_speaker(config, log, max_tokens=None):
         return None, decisions
     check_tokens = int(max_tokens or config.get("natural_check_tokens", 80))
     try:
-        fallback_seconds = max(0.5, float(config.get("natural_fallback_seconds", 2.5)))
+        fallback_seconds = max(0.5, float(config.get("natural_fallback_seconds", 4.5)))
     except (TypeError, ValueError):
-        fallback_seconds = 2.5
+        fallback_seconds = 4.5
     deadline = time.monotonic() + fallback_seconds
     for model_config in allowed:
         remaining = deadline - time.monotonic()
