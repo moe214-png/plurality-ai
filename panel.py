@@ -647,20 +647,31 @@ def dialogue_worker(config, prompt, reset, rounds, username=None):
     try:
         if turn_mode == "natural":
             enabled = enabled_models(config)
-            total_steps = rounds * len(enabled)
+            steps_per_round = len(enabled)
+            total_calls_base = count_enabled_calls(config, rounds)
             mention_queue = mentioned_models(config, log)
             mention_ids = {model.get("id") for model in mention_queue}
             first_cycle = [
                 model for model in random.sample(enabled, len(enabled)) if model.get("id") not in mention_ids
             ] if prompt else []
             opening_cycle = mention_queue + first_cycle
-            for _step in range(total_steps):
+            step_index = 0
+            remaining = rounds * steps_per_round
+            last_user_msg_count = sum(1 for item in log if item.get("role") == "user")
+            while remaining > 0:
                 if current_status(username).get("stop_requested"):
                     return
                 log = load_log(log_file)
-                if _step < len(opening_cycle):
-                    model_config = opening_cycle[_step]
-                    label = "点名优先" if _step < len(mention_queue) else "随机轮流"
+                # 检测用户新发言，刷新剩余轮数
+                current_user_count = sum(1 for item in log if item.get("role") == "user")
+                if current_user_count > last_user_msg_count:
+                    remaining = rounds * steps_per_round
+                    last_user_msg_count = current_user_count
+                    total_calls_base = remaining
+                    set_status(username, completed_calls=0, total_calls=total_calls_base)
+                if step_index < len(opening_cycle):
+                    model_config = opening_cycle[step_index]
+                    label = "点名优先" if step_index < len(mention_queue) else "随机轮流"
                     set_status(username, current_model=f"{label}：{model_config.get('name')}")
                 else:
                     set_status(username, current_model="选择发言者")
@@ -693,10 +704,16 @@ def dialogue_worker(config, prompt, reset, rounds, username=None):
                     else:
                         RUNNER_STATE["completed_calls"] += 1
 
+                step_index += 1
+                remaining -= 1
                 if not sleep_with_stop(delay_seconds, username):
                     return
         else:
-            for _round in range(rounds):
+            total_calls_base = count_enabled_calls(config, rounds)
+            last_user_msg_count = sum(1 for item in log if item.get("role") == "user")
+            round_index = 0
+            remaining_rounds = rounds
+            while remaining_rounds > 0:
                 for model_config in config.get("models", []):
                     if current_status(username).get("stop_requested"):
                         return
@@ -704,6 +721,13 @@ def dialogue_worker(config, prompt, reset, rounds, username=None):
                         continue
 
                     log = load_log(log_file)
+                    # 检测用户新发言，刷新剩余轮数
+                    current_user_count = sum(1 for item in log if item.get("role") == "user")
+                    if current_user_count > last_user_msg_count:
+                        remaining_rounds = rounds
+                        last_user_msg_count = current_user_count
+                        total_calls_base = count_enabled_calls(config, rounds)
+                        set_status(username, completed_calls=0, total_calls=total_calls_base)
                     set_status(username, current_model=model_config.get("name"))
                     caller = PROVIDER_CALLERS.get(model_config.get("provider"))
                     if not caller:
@@ -729,6 +753,7 @@ def dialogue_worker(config, prompt, reset, rounds, username=None):
 
                     if not sleep_with_stop(delay_seconds, username):
                         return
+                remaining_rounds -= 1
     except Exception as exc:
         set_status(username, last_error=compact_call_error(exc))
     finally:
