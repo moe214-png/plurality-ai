@@ -553,22 +553,41 @@ def customize_complex_scenario(payload, username=None):
 
     config["dialogue_mode"] = "custom"
     config["conversation_goal"] = (plan.get("conversation_goal") or description).strip()
+    customized_models = []
     for model in config.get("models", []):
         update = assignments.get(model.get("id"))
-        if not update:
-            continue
-        for field in ("name", "avatar", "system_prompt"):
-            if (update.get(field) or "").strip():
-                model[field] = update[field].strip()
-        if "speaker_weight" in update:
+        if update:
+            for field in ("name", "avatar", "system_prompt"):
+                if (update.get(field) or "").strip():
+                    model[field] = update[field].strip()
+        else:
+            role_name = model.get("name") or model.get("id") or "AI"
+            model["name"] = f"{role_name}顾问"
+            model["avatar"] = (role_name[:1] or "AI").upper()
+            base_prompt = model.get("system_prompt", "")
+            model["system_prompt"] = (
+                f"你是{model['name']}。本轮是复杂场景定制，用户需求是：{description}\n"
+                f"请基于你的原始能力承担一个清晰且不重复的协作角色。{base_prompt}"
+            )
+        if update and "speaker_weight" in update:
             try:
                 model["speaker_weight"] = max(0.1, min(5, float(update["speaker_weight"])))
             except (TypeError, ValueError):
                 pass
+        customized_models.append(
+            {
+                "id": model.get("id"),
+                "name": model.get("name"),
+                "avatar": model.get("avatar"),
+                "system_prompt": model.get("system_prompt"),
+                "speaker_weight": model.get("speaker_weight"),
+            }
+        )
 
     cfg_file, _log, _md, _exp = user_file_paths(username)
     save_json(cfg_file, config)
-    return {"ok": True, "config": public_config(username)}, 200
+    result = public_config(username)
+    return {"ok": True, "config": result, "customized_models": customized_models}, 200
 
 
 def current_status(username=None):
@@ -2008,6 +2027,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           body: JSON.stringify({ description, config: collectConfig() }),
         });
         config = data.config;
+        if (Array.isArray(data.customized_models)) {
+          const updates = new Map(data.customized_models.map(model => [model.id, model]));
+          config.models = config.models.map(model => ({ ...model, ...(updates.get(model.id) || {}) }));
+        }
         document.getElementById('customOverlay').classList.remove('show');
         document.getElementById('dialogueMode').value = config.dialogue_mode || 'custom';
         document.getElementById('goal').value = config.conversation_goal || '';
