@@ -1788,6 +1788,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   <script>
     let config = null;
     let hasMessages = false;
+    let stickToBottomOnce = false;
     let stopRequestedByUser = false;
     let stoppedNoticeUntil = 0;
     let sessionUsername = null;
@@ -2097,6 +2098,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     }
 
     async function continueDialogue() {
+      stickToBottomOnce = true;
       await runDialogue(false, '');
     }
 
@@ -2133,8 +2135,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       try {
         const status = await api('/api/status');
         if (!status.running) {
+          stickToBottomOnce = true;
           await runDialogue(!hasMessages, content);
         } else {
+          stickToBottomOnce = true;
           await api('/api/interject', { method: 'POST', body: JSON.stringify({ content }) });
           await refreshDialogue();
         }
@@ -2224,6 +2228,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       hasMessages = data.messages.length > 0;
       document.getElementById('lastUpdate').textContent = `最后更新：${new Date(data.last_update).toLocaleTimeString('zh-CN')}`;
       const root = document.getElementById('messages');
+      const distanceFromBottom = root.scrollHeight - root.scrollTop - root.clientHeight;
+      const wasNearBottom = distanceFromBottom < 72;
       if (!data.messages.length) {
         root.innerHTML = '<div class="empty">还没有对话。输入提示词后点击开始。</div>';
         return;
@@ -2240,7 +2246,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           </div>
         </article>
       `).join('');
-      root.scrollTop = root.scrollHeight;
+      if (stickToBottomOnce || wasNearBottom) {
+        root.scrollTop = root.scrollHeight;
+      }
+      stickToBottomOnce = false;
     }
 
     async function refreshAll() {
