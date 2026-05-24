@@ -44,6 +44,7 @@ from api_dialogue import (
 
 
 FOLDER = Path(__file__).resolve().parent
+load_dotenv(FOLDER / ".env")
 HOST = os.environ.get("PANEL_HOST", "0.0.0.0")
 PORT = int(os.environ.get("PORT") or os.environ.get("PANEL_PORT", "5000"))
 EXPORT_INDEX_FILE = FOLDER / "export_index.json"
@@ -676,89 +677,83 @@ def clear_dialogue(username=None):
 
 # ── Multi-user: API handlers ──────────────────────────────────────────────
 
-def handle_register(handler):
+def copy_base_files_for_user(username):
+    base = user_dir(username)
+    for src, name in [
+        (CONFIG_FILE, "models_config.json"),
+        (LOG_FILE, "api_dialogue_log.json"),
+        (MARKDOWN_FILE, "api_dialogue.md"),
+        (EXPORT_INDEX_FILE, "export_index.json"),
+    ]:
+        dst = base / name
+        if src.exists() and not dst.exists():
+            dst.write_bytes(src.read_bytes())
+
+
+def validate_invite_code(invite):
+    required_invite = (
+        os.environ.get("PANEL_INVITE_CODE", "").strip()
+        or os.environ.get("PANEL_PASSWORD", "").strip()
+    )
+    if not required_invite:
+        return False, "服务器还没有设置邀请码"
+    if not invite or not secrets.compare_digest(invite, required_invite):
+        return False, "邀请码不正确"
+    return True, ""
+
+
+def handle_auth(handler):
     if not MULTI_USER:
         response_json(handler, {"ok": False, "error": "多用户模式未启用"}, 400)
         return
     payload = read_json_body(handler)
     username = (payload.get("username") or "").strip()
-    password = (payload.get("password") or "").strip()
     invite = (payload.get("invite") or "").strip()
 
-    if not username or not password:
-        response_json(handler, {"ok": False, "error": "用户名和密码不能为空"}, 400)
+    if not username:
+        response_json(handler, {"ok": False, "error": "请填写用户名"}, 400)
         return
 
-    # Invitation code check (only if PANEL_INVITE_CODE is set)
-    required_invite = os.environ.get("PANEL_INVITE_CODE", "").strip()
-    if required_invite and invite != required_invite:
-        response_json(handler, {"ok": False, "error": "邀请码不正确"}, 400)
+    invite_ok, invite_error = validate_invite_code(invite)
+    if not invite_ok:
+        status = 500 if "没有设置" in invite_error else 400
+        response_json(handler, {"ok": False, "error": invite_error}, status)
         return
 
     if not re.match(r'^[a-zA-Z0-9_一-鿿]{2,30}$', username):
-        response_json(handler, {"ok": False, "error": f"用户名格式不正确'（{username}'——2-30位字母、数字、下划线或中文）"}, 400)
-        return
-    if len(password) < 4:
-        response_json(handler, {"ok": False, "error": "密码至少需要4位"}, 400)
-        return
-
-    users = load_users()
-    existing_names = sorted(users.keys())
-    if username.lower() in (u.lower() for u in users):
-        response_json(handler, {"ok": False, "error": f"用户名已存在（当前已有 {len(users)} 位用户: {', '.join(existing_names)}）"}, 409)
-        return
-
-    pw_hash, salt = hash_password(password)
-    is_first_user = len(users) == 0
-    users[username] = {
-        "password_hash": pw_hash,
-        "salt": salt,
-        "created_at": datetime.now().isoformat(timespec="seconds"),
-    }
-    save_users(users)
-    ensure_user_dir(username)
-
-    if is_first_user:
-        base = user_dir(username)
-        for src, name in [
-            (CONFIG_FILE, "models_config.json"),
-            (LOG_FILE, "api_dialogue_log.json"),
-            (MARKDOWN_FILE, "api_dialogue.md"),
-            (EXPORT_INDEX_FILE, "export_index.json"),
-        ]:
-            dst = base / name
-            if src.exists() and not dst.exists():
-                dst.write_bytes(src.read_bytes())
-
-    token = create_session(username)
-    cookie = f"{SESSION_COOKIE}={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={SESSION_MAX_AGE}"
-    response_json(handler, {"ok": True, "username": username}, set_cookie=cookie)
-
-
-def handle_login(handler):
-    if not MULTI_USER:
-        response_json(handler, {"ok": False, "error": "多用户模式未启用"}, 400)
-        return
-    payload = read_json_body(handler)
-    username = (payload.get("username") or "").strip()
-    password = (payload.get("password") or "").strip()
-
-    if not username or not password:
-        response_json(handler, {"ok": False, "error": "请输入用户名和密码"}, 400)
+        response_json(handler, {"ok": False, "error": f"用户名格式不正确（{username}：2-30位字母、数字、下划线或中文）"}, 400)
         return
 
     users = load_users()
     match = next((u for u in users if u.lower() == username.lower()), None)
-    if not match or not verify_password(password, users[match]["password_hash"], users[match]["salt"]):
-        if match is None:
-            hash_password(password)
-        response_json(handler, {"ok": False, "error": "用户名或密码错误"}, 401)
-        return
+    created = match is None
+    is_first_user = len(users) == 0
+    now = datetime.now().isoformat(timespec="seconds")
+
+    if created:
+        match = username
+        users[match] = {
+            "created_at": now,
+            "auth_mode": "invite",
+        }
+    users[match]["last_login"] = now
+    save_users(users)
 
     ensure_user_dir(match)
+    if is_first_user:
+        copy_base_files_for_user(match)
+
     token = create_session(match)
     cookie = f"{SESSION_COOKIE}={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={SESSION_MAX_AGE}"
-    response_json(handler, {"ok": True, "username": match}, set_cookie=cookie)
+    response_json(handler, {"ok": True, "username": match, "created": created}, set_cookie=cookie)
+
+
+def handle_register(handler):
+    handle_auth(handler)
+
+
+def handle_login(handler):
+    handle_auth(handler)
 
 
 def handle_logout(handler):
@@ -775,7 +770,7 @@ class PanelHandler(BaseHTTPRequestHandler):
     def _public_get_paths(self):
         paths = {"/health", "/api/env-check", "/api/session", "/api/users"}
         if MULTI_USER:
-            paths.update({"/api/login", "/api/register", "/api/logout"})
+            paths.update({"/api/auth", "/api/login", "/api/register", "/api/logout"})
         return paths
 
     def do_HEAD(self):
@@ -862,8 +857,8 @@ class PanelHandler(BaseHTTPRequestHandler):
             response_json(
                 self,
                 {
-                    "PANEL_USER_set": bool(os.environ.get("PANEL_USER", "").strip()),
-                    "PANEL_PASSWORD_set": bool(os.environ.get("PANEL_PASSWORD", "").strip()),
+                    "PANEL_MULTI_USER_set": MULTI_USER,
+                    "PANEL_INVITE_CODE_set": bool(os.environ.get("PANEL_INVITE_CODE", "").strip()),
                     "CLAUDE_API_KEY_set": bool(os.environ.get("CLAUDE_API_KEY", "").strip()),
                     "OPENAI_API_KEY_set": bool(os.environ.get("OPENAI_API_KEY", "").strip()),
                     "DEEPSEEK_API_KEY_set": bool(os.environ.get("DEEPSEEK_API_KEY", "").strip()),
@@ -895,7 +890,10 @@ class PanelHandler(BaseHTTPRequestHandler):
         # Multi-user public POST endpoints (no auth required)
         if MULTI_USER:
             try:
-                if path == "/api/register":
+                if path == "/api/auth":
+                    handle_auth(self)
+                    return
+                elif path == "/api/register":
                     handle_register(self)
                     return
                 elif path == "/api/login":
@@ -1421,32 +1419,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       box-shadow: 0 20px 50px rgba(15, 23, 42, 0.25);
     }
     .login-card h2 { margin: 0 0 20px; font-size: 20px; text-align: center; }
-    .login-tabs {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 0;
-      margin-bottom: 20px;
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      overflow: hidden;
-    }
-    .login-tab {
-      padding: 8px;
-      text-align: center;
-      cursor: pointer;
-      font-weight: 700;
-      font-size: 14px;
-      background: #f4f6f8;
-      color: var(--muted);
-      border: 0;
-    }
-    .login-tab.active { background: var(--accent); color: #fff; }
     .login-card label { margin-bottom: 12px; }
     .login-card .error { color: var(--danger); font-size: 13px; min-height: 20px; margin-bottom: 12px; }
     .login-card button { width: 100%; }
-    .login-confirm { display: none; }
-    .login-card.register .login-confirm { display: grid; }
-    .login-card.register .login-only { display: none; }
     .privacy-note {
       text-align: center;
       font-size: 11px;
@@ -1469,17 +1444,11 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   <!-- ── Login overlay (shown when not authenticated in multi-user mode) ── -->
   <div id="loginOverlay" class="login-overlay">
     <div class="login-card" id="loginCard">
-      <h2 id="loginTitle">登录</h2>
-      <div class="login-tabs">
-        <button class="login-tab active" id="tabLogin" onclick="switchAuthTab('login')">登录</button>
-        <button class="login-tab" id="tabRegister" onclick="switchAuthTab('register')">注册</button>
-      </div>
+      <h2 id="loginTitle">进入面板</h2>
       <label>用户名 <input id="loginUsername" type="text" autocomplete="username" /></label>
-      <label>密码 <input id="loginPassword" type="password" autocomplete="current-password" /></label>
-      <label class="login-confirm">确认密码 <input id="loginPasswordConfirm" type="password" autocomplete="new-password" /></label>
-      <label class="login-confirm">邀请码 <input id="loginInviteCode" type="text" /></label>
+      <label>邀请码 <input id="loginInviteCode" type="password" autocomplete="off" /></label>
       <div class="error" id="loginError"></div>
-      <button id="loginSubmitBtn" onclick="handleAuthSubmit()">登录</button>
+      <button id="loginSubmitBtn" onclick="handleAuthSubmit()">进入</button>
       <p class="privacy-note">你的聊天记录仅自己可见，开发者不会、也无法查看。</p>
     </div>
   </div>
@@ -1611,7 +1580,6 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     let stopRequestedByUser = false;
     let stoppedNoticeUntil = 0;
     let sessionUsername = null;
-    let authMode = 'login';
     let pollTimer = null;
 
     // ── Auth ──
@@ -1632,46 +1600,22 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         return false;
     }
 
-    function switchAuthTab(mode) {
-        authMode = mode;
-        document.getElementById('tabLogin').classList.toggle('active', mode === 'login');
-        document.getElementById('tabRegister').classList.toggle('active', mode === 'register');
-        document.getElementById('loginTitle').textContent = mode === 'login' ? '登录' : '注册';
-        document.getElementById('loginSubmitBtn').textContent = mode === 'login' ? '登录' : '注册';
-        document.getElementById('loginCard').classList.toggle('register', mode === 'register');
-        document.getElementById('loginError').textContent = '';
-    }
-
     async function handleAuthSubmit() {
         const username = document.getElementById('loginUsername').value.trim();
-        const password = document.getElementById('loginPassword').value;
+        const invite = (document.getElementById('loginInviteCode')?.value || '').trim();
         const errorEl = document.getElementById('loginError');
         errorEl.textContent = '';
 
-        if (!username || !password) {
-            errorEl.textContent = '请填写用户名和密码';
+        if (!username || !invite) {
+            errorEl.textContent = '请填写用户名和邀请码';
             return;
         }
 
-        if (authMode === 'register') {
-            const confirm = (document.getElementById('loginPasswordConfirm').value || '');
-            if (password !== confirm) {
-                errorEl.textContent = '两次密码不一致';
-                return;
-            }
-            if (password.length < 4) {
-                errorEl.textContent = '密码至少需要4位';
-                return;
-            }
-        }
-
-        const endpoint = authMode === 'login' ? '/api/login' : '/api/register';
-        const invite = (document.getElementById('loginInviteCode')?.value || '').trim();
         try {
-            const resp = await fetch(endpoint, {
+            const resp = await fetch('/api/auth', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({username, password, invite})
+                body: JSON.stringify({username, invite})
             });
             const data = await resp.json();
             if (!data.ok) throw new Error(data.error);
@@ -2029,10 +1973,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     }
 
     // Add Enter key login support
-    const loginPassword = document.getElementById('loginPassword');
-    const loginPasswordConfirm = document.getElementById('loginPasswordConfirm');
-    if (loginPassword) loginPassword.addEventListener('keydown', function(e) { if (e.key === 'Enter') handleAuthSubmit(); });
-    if (loginPasswordConfirm) loginPasswordConfirm.addEventListener('keydown', function(e) { if (e.key === 'Enter') handleAuthSubmit(); });
+    const loginUsername = document.getElementById('loginUsername');
+    const loginInviteCode = document.getElementById('loginInviteCode');
+    if (loginUsername) loginUsername.addEventListener('keydown', function(e) { if (e.key === 'Enter') handleAuthSubmit(); });
+    if (loginInviteCode) loginInviteCode.addEventListener('keydown', function(e) { if (e.key === 'Enter') handleAuthSubmit(); });
 
     bindKeyboardShortcuts();
     checkSession().then(function(loggedIn) {
@@ -2114,23 +2058,17 @@ LITE_TEMPLATE = r"""<!DOCTYPE html>
     .login-card button { width: 100%; margin-top: 6px; }
     .login-card .secondary { background: #e8edf3; color: #1f2937; }
     .login-error { color: #b42318; font-size: 13px; margin-bottom: 8px; }
-    .login-confirm { display: none; }
-    .login-card.register .login-confirm { display: block; }
-    .login-card.register .login-only { display: none; }
     .privacy-note { text-align: center; font-size: 11px; color: #888; margin: 14px 0 0; }
   </style>
 </head>
 <body>
   <div class="login-overlay show" id="loginOverlay">
     <div class="login-card" id="loginCard">
-      <h2 id="loginTitle">登录</h2>
+      <h2 id="loginTitle">进入面板</h2>
       <input id="loginUsername" type="text" placeholder="用户名" autocomplete="username" />
-      <input id="loginPassword" type="password" placeholder="密码" autocomplete="current-password" />
-      <input class="login-confirm" id="loginPasswordConfirm" type="password" placeholder="确认密码" autocomplete="new-password" />
-      <input class="login-confirm" id="loginInviteCode" type="text" placeholder="邀请码" />
+      <input id="loginInviteCode" type="password" placeholder="邀请码" autocomplete="off" />
       <div class="login-error" id="loginError"></div>
-      <button id="loginSubmitBtn" onclick="handleAuthSubmit()">登录</button>
-      <button class="secondary" onclick="switchAuthTab()" style="margin-top:4px;" id="switchBtn">或者注册新账号</button>
+      <button id="loginSubmitBtn" onclick="handleAuthSubmit()">进入</button>
       <p class="privacy-note">你的聊天记录仅自己可见，开发者不会查看。</p>
     </div>
   </div>
@@ -2149,7 +2087,6 @@ LITE_TEMPLATE = r"""<!DOCTYPE html>
   </main>
   <script>
     let liteSessionUser = null;
-    let liteAuthMode = 'login';
     let litePoll = null;
 
     async function checkSession() {
@@ -2166,28 +2103,12 @@ LITE_TEMPLATE = r"""<!DOCTYPE html>
         return false;
     }
 
-    function switchAuthTab() {
-        liteAuthMode = liteAuthMode === 'login' ? 'register' : 'login';
-        document.getElementById('loginTitle').textContent = liteAuthMode === 'login' ? '登录' : '注册';
-        document.getElementById('loginSubmitBtn').textContent = liteAuthMode === 'login' ? '登录' : '注册';
-        document.getElementById('switchBtn').textContent = liteAuthMode === 'login' ? '或者注册新账号' : '返回登录';
-        document.getElementById('loginCard').classList.toggle('register', liteAuthMode === 'register');
-        document.getElementById('loginError').textContent = '';
-    }
-
     async function handleAuthSubmit() {
         const username = document.getElementById('loginUsername').value.trim();
-        const password = document.getElementById('loginPassword').value;
-        if (!username || !password) { document.getElementById('loginError').textContent = '请填写用户名和密码'; return; }
-        if (liteAuthMode === 'register') {
-            const confirm = document.getElementById('loginPasswordConfirm').value || '';
-            if (password !== confirm) { document.getElementById('loginError').textContent = '两次密码不一致'; return; }
-            if (password.length < 4) { document.getElementById('loginError').textContent = '密码至少需要4位'; return; }
-        }
-        const endpoint = liteAuthMode === 'login' ? '/api/login' : '/api/register';
+        const invite = document.getElementById('loginInviteCode')?.value?.trim() || '';
+        if (!username || !invite) { document.getElementById('loginError').textContent = '请填写用户名和邀请码'; return; }
         try {
-            const invite = document.getElementById('loginInviteCode')?.value?.trim() || '';
-            const resp = await fetch(endpoint, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({username,password,invite})});
+            const resp = await fetch('/api/auth', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({username,invite})});
             const data = await resp.json();
             if (!data.ok) throw new Error(data.error);
             liteSessionUser = data.username;
@@ -2247,10 +2168,10 @@ LITE_TEMPLATE = r"""<!DOCTYPE html>
       await refreshAll();
     }
 
-    const _lp = document.getElementById('loginPassword');
-    const _lpc = document.getElementById('loginPasswordConfirm');
-    if (_lp) _lp.addEventListener('keydown', function(e) { if (e.key === 'Enter') handleAuthSubmit(); });
-    if (_lpc) _lpc.addEventListener('keydown', function(e) { if (e.key === 'Enter') handleAuthSubmit(); });
+    const _lu = document.getElementById('loginUsername');
+    const _li = document.getElementById('loginInviteCode');
+    if (_lu) _lu.addEventListener('keydown', function(e) { if (e.key === 'Enter') handleAuthSubmit(); });
+    if (_li) _li.addEventListener('keydown', function(e) { if (e.key === 'Enter') handleAuthSubmit(); });
 
     checkSession().then(function(loggedIn) {
         if (loggedIn) {
@@ -2273,27 +2194,7 @@ def main():
     if MULTI_USER:
         if not USERS_FILE.exists():
             users = {}
-            existing_user, existing_pass = panel_credentials()
-            if existing_pass:
-                pw_hash, salt = hash_password(existing_pass)
-                users[existing_user] = {
-                    "password_hash": pw_hash,
-                    "salt": salt,
-                    "created_at": datetime.now().isoformat(timespec="seconds"),
-                }
             save_users(users)
-            if existing_pass:
-                base = user_dir(existing_user)
-                base.mkdir(parents=True, exist_ok=True)
-                for src, name in [
-                    (CONFIG_FILE, "models_config.json"),
-                    (LOG_FILE, "api_dialogue_log.json"),
-                    (MARKDOWN_FILE, "api_dialogue.md"),
-                    (EXPORT_INDEX_FILE, "export_index.json"),
-                ]:
-                    if src.exists():
-                        dst = base / name
-                        dst.write_bytes(src.read_bytes())
             print(f"[multi-user] Initialized. Users: {list(users.keys()) or '(none yet)'}")
         else:
             sessions = load_sessions()
