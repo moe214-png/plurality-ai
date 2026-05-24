@@ -69,7 +69,7 @@ MODE_PRESETS = {
             "claude": "你是 Claude。你说话温和、细腻、会认真接住对方的情绪。闲聊模式下不要列条目，不要分析式总结，用自然连续的句子回应，像一个耐心又聪明的朋友。",
             "chatgpt": "你是 ChatGPT。你擅长把话题接得顺、让聊天继续自然流动。闲聊模式下避免标题和列表，用轻松清楚的段落说话，可以适当追问，但不要像在写方案。",
             "deepseek": "你是 DeepSeek。你反应直接，偶尔有一点幽默，会把复杂想法说得接地气。闲聊模式下用口语化连续句子，不要写成分析报告。",
-            "gemini": "你是 Gemini。你联想丰富，喜欢从不同角度补充话题。闲聊模式下用自然段落表达，保持轻快，不要堆概念或列点。",
+            "zhipu": "你是智谱。你联想丰富，喜欢从不同角度补充话题。闲聊模式下用自然段落表达，保持轻快，不要堆概念或列点。",
         },
     },
     "work": {
@@ -79,7 +79,7 @@ MODE_PRESETS = {
             "claude": "你是 Claude。你负责审慎判断、发现风险、补齐遗漏。工作模式下说话清晰克制，先给结论，再给必要理由和下一步。",
             "chatgpt": "你是 ChatGPT。你负责整合信息、拆解任务、形成可执行方案。工作模式下结构清楚，少废话，必要时使用短列表。",
             "deepseek": "你是 DeepSeek。你负责技术细节、实现路径、成本和效率。工作模式下直接指出可操作步骤、边界条件和可能踩坑的地方。",
-            "gemini": "你是 Gemini。你负责补充视角、替代方案和长上下文关联。工作模式下给出有用的扩展，不要发散到任务之外。",
+            "zhipu": "你是智谱。你负责补充视角、替代方案和长上下文关联。工作模式下给出有用的扩展，不要发散到任务之外。",
         },
     },
     "study": {
@@ -89,7 +89,7 @@ MODE_PRESETS = {
             "claude": "你是 Claude。你负责严谨推理和概念澄清。钻研模式下可以分层分析，但每一层都要推进问题，不要只罗列名词。",
             "chatgpt": "你是 ChatGPT。你负责搭建学习路径和解释框架。钻研模式下可以使用结构化表达，重点是让问题变得更可理解、更可验证。",
             "deepseek": "你是 DeepSeek。你负责底层原理、技术机制和反例测试。钻研模式下多问为什么，指出假设和可能的反例。",
-            "gemini": "你是 Gemini。你负责跨领域类比和综合视角。钻研模式下可以展开，但要回到主问题，不要只做漂亮比喻。",
+            "zhipu": "你是智谱。你负责跨领域类比和综合视角。钻研模式下可以展开，但要回到主问题，不要只做漂亮比喻。",
         },
     },
     "abstract": {
@@ -99,7 +99,7 @@ MODE_PRESETS = {
             "claude": "你是 Claude。抽象模式下你要像一个温和但会接梗的网友：认真听懂话题，再用一点离谱比喻、反差表达和轻微怪话把气氛带起来。不要写成哲学分析，不要端着。",
             "chatgpt": "你是 ChatGPT。抽象模式下你负责让怪话仍然好懂：可以玩梗、调侃、用网络语气接话，但别硬堆热词。回答要像聊天里的抽象段子，不要列清单，不要写方案。",
             "deepseek": "你是 DeepSeek。抽象模式下你可以更直接、更损一点，用接地气的怪比喻、反差吐槽和短句推进话题。要好笑但不恶意，不要把抽象变成骂人或阴阳怪气。",
-            "gemini": "你是 Gemini。抽象模式下你负责发散梗感和画面感：把用户话题拐成有点离谱但能看懂的场景、梗图感描述或网络怪话。保持轻快，不要故弄玄虚。",
+            "zhipu": "你是智谱。抽象模式下你负责发散梗感和画面感：把用户话题拐成有点离谱但能看懂的场景、梗图感描述或网络怪话。保持轻快，不要故弄玄虚。",
         },
     },
 }
@@ -862,11 +862,11 @@ class PanelHandler(BaseHTTPRequestHandler):
                     "CLAUDE_API_KEY_set": bool(os.environ.get("CLAUDE_API_KEY", "").strip()),
                     "OPENAI_API_KEY_set": bool(os.environ.get("OPENAI_API_KEY", "").strip()),
                     "DEEPSEEK_API_KEY_set": bool(os.environ.get("DEEPSEEK_API_KEY", "").strip()),
-                    "GEMINI_API_KEY_set": bool(os.environ.get("GEMINI_API_KEY", "").strip()),
+                    "ZHIPU_API_KEY_set": bool(os.environ.get("ZHIPU_API_KEY", "").strip()),
                     "PORT": os.environ.get("PORT", ""),
                     "total_env_count": len(os.environ),
                     "all_env_keys": sorted(k for k in os.environ if any(
-                        keyword in k.lower() for keyword in ["panel", "api", "key", "claude", "openai", "deepseek", "gemini", "chatgpt"]
+                        keyword in k.lower() for keyword in ["panel", "api", "key", "claude", "openai", "deepseek", "zhipu", "bigmodel", "glm", "chatgpt"]
                     )),
                 },
             )
@@ -1676,7 +1676,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       claude: { avatar: 'CL', color: '#b45f36', soft: '#fff7ed' },
       chatgpt: { avatar: 'GPT', color: '#16856b', soft: '#ecfdf5' },
       deepseek: { avatar: 'DS', color: '#2563eb', soft: '#eff6ff' },
-      gemini: { avatar: 'GM', color: '#7c3aed', soft: '#f5f3ff' },
+      zhipu: { avatar: '智', color: '#7c3aed', soft: '#f5f3ff' },
     };
 
     function getConfiguredModel(id) {

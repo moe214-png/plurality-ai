@@ -2,7 +2,7 @@
 """
 Four-model API dialogue runner.
 
-This script rotates a prompt through Claude, ChatGPT, DeepSeek, and Gemini by
+This script rotates a prompt through Claude, ChatGPT, DeepSeek, and Zhipu by
 default. API keys are read from environment variables; model names and order are
 kept in models_config.json so you can adjust them without editing code.
 """
@@ -93,16 +93,17 @@ DEFAULT_CONFIG = {
             "system_prompt": "你是 DeepSeek。你反应直接，偶尔有一点幽默，会把复杂想法说得接地气。闲聊模式下用口语化连续句子，不要写成分析报告。",
         },
         {
-            "id": "gemini",
-            "name": "Gemini",
-            "avatar": "GM",
+            "id": "zhipu",
+            "name": "智谱",
+            "avatar": "智",
             "enabled": True,
             "speaker_weight": 1.0,
             "provider": "openai_compatible",
-            "base_url": "https://new.lemonapi.site/v1",
-            "model": "[L]gemini-3.1-pro-preview",
-            "api_key_env": "GEMINI_API_KEY",
-            "system_prompt": "你是 Gemini。你联想丰富，喜欢从不同角度补充话题。闲聊模式下用自然段落表达，保持轻快，不要堆概念或列点。",
+            "base_url": "https://open.bigmodel.cn/api/paas/v4",
+            "model": "glm-5.1",
+            "api_key_env": "ZHIPU_API_KEY",
+            "thinking": {"type": "disabled"},
+            "system_prompt": "你是智谱。你联想丰富，喜欢从不同角度补充话题。闲聊模式下用自然段落表达，保持轻快，不要堆概念或列点。",
         },
     ],
 }
@@ -246,11 +247,15 @@ def format_call_failure(error):
 
 
 def get_api_key(model_config):
-    env_name = model_config.get("api_key_env")
-    api_key = os.environ.get(env_name or "")
-    if not api_key:
-        raise ApiDialogueError(f"Missing API key: set environment variable {env_name}")
-    return api_key
+    env_names = []
+    if model_config.get("api_key_env"):
+        env_names.append(model_config["api_key_env"])
+    env_names.extend(model_config.get("api_key_env_fallbacks") or [])
+    for env_name in env_names:
+        api_key = os.environ.get(env_name or "")
+        if api_key:
+            return api_key
+    raise ApiDialogueError(f"Missing API key: set environment variable {' or '.join(env_names)}")
 
 
 def build_user_prompt(config, log, current_model):
@@ -371,6 +376,9 @@ def call_openai_compatible(model_config, prompt, max_tokens):
         ],
         "max_tokens": max_tokens,
     }
+    for key in ("temperature", "top_p", "thinking"):
+        if key in model_config:
+            payload[key] = model_config[key]
     data = http_json(
         "POST",
         f"{base_url}/chat/completions",
