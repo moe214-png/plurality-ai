@@ -645,6 +645,70 @@ def natural_allowed_models(config, log, candidates):
     return allowed, decisions
 
 
+def model_mention_aliases(model_config):
+    aliases = [
+        model_config.get("id", ""),
+        model_config.get("name", ""),
+        model_config.get("avatar", ""),
+    ]
+    builtin_aliases = {
+        "claude": ["claude", "克劳德"],
+        "chatgpt": ["chatgpt", "gpt", "openai"],
+        "deepseek": ["deepseek", "deep seek", "深度求索", "深求"],
+        "zhipu": ["zhipu", "智谱", "glm"],
+        "doubao": ["doubao", "豆包"],
+    }
+    aliases.extend(builtin_aliases.get(str(model_config.get("id", "")).lower(), []))
+    result = []
+    seen = set()
+    for alias in aliases:
+        alias = str(alias or "").strip()
+        if not alias:
+            continue
+        key = alias.lower()
+        if key not in seen:
+            seen.add(key)
+            result.append(alias)
+    return result
+
+
+def mentioned_models(config, log, lookback=2):
+    candidates = enabled_models(config)
+    if not candidates:
+        return []
+    recent_user_messages = [
+        item
+        for item in reversed(log)
+        if item.get("role") == "user" and (item.get("content") or "").strip()
+    ][:lookback]
+    if not recent_user_messages:
+        return []
+
+    mentions = []
+    seen_ids = set()
+    # Newer user messages win; within the same message, earlier mentions win.
+    for item in recent_user_messages:
+        text = item.get("content", "")
+        lowered = text.lower()
+        found = []
+        for model in candidates:
+            positions = []
+            for alias in model_mention_aliases(model):
+                pos = lowered.find(alias.lower())
+                if pos >= 0:
+                    positions.append(pos)
+            if positions:
+                found.append((min(positions), model))
+        for _pos, model in sorted(found, key=lambda pair: pair[0]):
+            model_id = model.get("id")
+            if model_id not in seen_ids:
+                mentions.append(model)
+                seen_ids.add(model_id)
+        if mentions:
+            break
+    return mentions
+
+
 def balance_bonus(config, log, model_id, allowed):
     if not config.get("natural_balance_enabled", True) or len(allowed) <= 1:
         return 0
@@ -920,12 +984,18 @@ def run_dialogue(config, prompt=None, prompt_file=None, rounds=None, reset=False
     if turn_mode == "natural":
         enabled = enabled_models(config)
         total_steps = total_rounds * len(enabled)
-        first_cycle = random.sample(enabled, len(enabled)) if prompt else []
+        mention_queue = mentioned_models(config, log)
+        mention_ids = {model.get("id") for model in mention_queue}
+        first_cycle = [
+            model for model in random.sample(enabled, len(enabled)) if model.get("id") not in mention_ids
+        ] if prompt else []
+        opening_cycle = mention_queue + first_cycle
         for step_index in range(total_steps):
             print(f"\n=== 自然发言 {step_index + 1}/{total_steps} ===")
-            if step_index < len(first_cycle):
-                model_config = first_cycle[step_index]
-                print(f"  首轮随机轮流: {model_config['name']}")
+            if step_index < len(opening_cycle):
+                model_config = opening_cycle[step_index]
+                label = "点名优先" if step_index < len(mention_queue) else "首轮随机轮流"
+                print(f"  {label}: {model_config['name']}")
             else:
                 model_config, decisions = choose_next_natural_speaker(config, log)
                 for decision in decisions:
