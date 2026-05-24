@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Four-model API dialogue runner.
+Multi-model API dialogue runner.
 
-This script rotates a prompt through Claude, ChatGPT, DeepSeek, and Zhipu by
+This script rotates a prompt through Claude, ChatGPT, DeepSeek, Zhipu, and Doubao by
 default. API keys are read from environment variables; model names and order are
 kept in models_config.json so you can adjust them without editing code.
 """
@@ -36,7 +36,7 @@ RETRYABLE_NETWORK_MARKERS = (
 )
 
 DEFAULT_CONFIG = {
-    "max_rounds": 15,
+    "max_rounds": 5,
     "delay_seconds": 0,
     "max_output_tokens": 1200,
     "response_min_chars": 1,
@@ -48,12 +48,12 @@ DEFAULT_CONFIG = {
     "natural_pick_strategy": "sample",
     "natural_judge_model_id": "deepseek",
     "natural_check_tokens": 80,
-    "max_consecutive_turns": 1,
+    "max_consecutive_turns": 2,
     "natural_balance_enabled": True,
     "natural_balance_window": 8,
     "natural_balance_strength": 1.0,
     "natural_silence_fallback": True,
-    "self_memory_turns": 15,
+    "self_memory_turns": 30,
     "conversation_goal": "四个 AI 像朋友一样围绕用户的话题自然接话。不要做报告，不要列清单，优先使用连续的句子和轻松的短段落。",
     "models": [
         {
@@ -105,6 +105,18 @@ DEFAULT_CONFIG = {
             "thinking": {"type": "disabled"},
             "system_prompt": "你是智谱。你联想丰富，喜欢从不同角度补充话题。闲聊模式下用自然段落表达，保持轻快，不要堆概念或列点。",
         },
+        {
+            "id": "doubao",
+            "name": "豆包",
+            "avatar": "豆",
+            "enabled": True,
+            "speaker_weight": 1.0,
+            "provider": "volc_responses",
+            "base_url": "https://ark.cn-beijing.volces.com/api/v3/responses",
+            "model": "doubao-seed-2-0-pro-260215",
+            "api_key_env": "DOUBAO_API_KEY",
+            "system_prompt": "你是豆包。你说话灵活、会照顾上下文，擅长把话题接得自然、有生活感。闲聊模式下不要列清单，用短段落推进聊天。",
+        },
     ],
 }
 
@@ -140,11 +152,32 @@ def save_json(path, data):
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 
+def merge_config_defaults(config):
+    changed = False
+    for key, value in DEFAULT_CONFIG.items():
+        if key == "models":
+            continue
+        if key not in config:
+            config[key] = value
+            changed = True
+
+    models = config.setdefault("models", [])
+    existing_ids = {model.get("id") for model in models}
+    for default_model in DEFAULT_CONFIG["models"]:
+        if default_model.get("id") not in existing_ids:
+            models.append(json.loads(json.dumps(default_model, ensure_ascii=False)))
+            changed = True
+    return changed
+
+
 def ensure_config(config_file=None):
     cf = config_file or CONFIG_FILE
     if not cf.exists():
         save_json(cf, DEFAULT_CONFIG)
-    return load_json(cf, DEFAULT_CONFIG)
+    config = load_json(cf, DEFAULT_CONFIG)
+    if merge_config_defaults(config):
+        save_json(cf, config)
+    return config
 
 
 def load_log(log_file=None):
@@ -394,6 +427,52 @@ def call_openai_compatible(model_config, prompt, max_tokens):
         raise ApiDialogueError(f"Compatible response did not contain text: {json.dumps(data, ensure_ascii=False)[:1000]}") from exc
 
 
+def extract_responses_text(data):
+    if isinstance(data.get("output_text"), str) and data["output_text"].strip():
+        return data["output_text"].strip()
+    chunks = []
+    for item in data.get("output", []) or []:
+        if isinstance(item, dict):
+            for content in item.get("content", []) or []:
+                if not isinstance(content, dict):
+                    continue
+                text = content.get("text") or content.get("output_text")
+                if text:
+                    chunks.append(text)
+    if chunks:
+        return "\n".join(chunks).strip()
+    return ""
+
+
+def call_volc_responses(model_config, prompt, max_tokens):
+    api_key = get_api_key(model_config)
+    url = model_config.get("base_url", "").rstrip("/")
+    payload = {
+        "model": model_config["model"],
+        "input": [
+            {"role": "system", "content": model_config.get("system_prompt", "")},
+            {"role": "user", "content": prompt},
+        ],
+        "max_output_tokens": max_tokens,
+    }
+    for key in ("temperature", "top_p"):
+        if key in model_config:
+            payload[key] = model_config[key]
+    data = http_json(
+        "POST",
+        url,
+        {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        payload,
+    )
+    text = extract_responses_text(data)
+    if text:
+        return text
+    raise ApiDialogueError(f"Doubao response did not contain text: {json.dumps(data, ensure_ascii=False)[:1000]}")
+
+
 def call_gemini(model_config, prompt, max_tokens):
     api_key = get_api_key(model_config)
     model_name = urllib.parse.quote(model_config["model"], safe="")
@@ -435,6 +514,7 @@ PROVIDER_CALLERS = {
     "openai": call_openai,
     "anthropic": call_anthropic,
     "openai_compatible": call_openai_compatible,
+    "volc_responses": call_volc_responses,
     "gemini": call_gemini,
 }
 

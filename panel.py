@@ -70,6 +70,7 @@ MODE_PRESETS = {
             "chatgpt": "你是 ChatGPT。你擅长把话题接得顺、让聊天继续自然流动。闲聊模式下避免标题和列表，用轻松清楚的段落说话，可以适当追问，但不要像在写方案。",
             "deepseek": "你是 DeepSeek。你反应直接，偶尔有一点幽默，会把复杂想法说得接地气。闲聊模式下用口语化连续句子，不要写成分析报告。",
             "zhipu": "你是智谱。你联想丰富，喜欢从不同角度补充话题。闲聊模式下用自然段落表达，保持轻快，不要堆概念或列点。",
+            "doubao": "你是豆包。你说话灵活、会照顾上下文，擅长把话题接得自然、有生活感。闲聊模式下不要列清单，用短段落推进聊天。",
         },
     },
     "work": {
@@ -80,6 +81,7 @@ MODE_PRESETS = {
             "chatgpt": "你是 ChatGPT。你负责整合信息、拆解任务、形成可执行方案。工作模式下结构清楚，少废话，必要时使用短列表。",
             "deepseek": "你是 DeepSeek。你负责技术细节、实现路径、成本和效率。工作模式下直接指出可操作步骤、边界条件和可能踩坑的地方。",
             "zhipu": "你是智谱。你负责补充视角、替代方案和长上下文关联。工作模式下给出有用的扩展，不要发散到任务之外。",
+            "doubao": "你是豆包。你负责把任务落到实际使用场景里，补充执行细节、体验感和容易被忽略的小问题。工作模式下简洁直接。",
         },
     },
     "study": {
@@ -90,6 +92,7 @@ MODE_PRESETS = {
             "chatgpt": "你是 ChatGPT。你负责搭建学习路径和解释框架。钻研模式下可以使用结构化表达，重点是让问题变得更可理解、更可验证。",
             "deepseek": "你是 DeepSeek。你负责底层原理、技术机制和反例测试。钻研模式下多问为什么，指出假设和可能的反例。",
             "zhipu": "你是智谱。你负责跨领域类比和综合视角。钻研模式下可以展开，但要回到主问题，不要只做漂亮比喻。",
+            "doubao": "你是豆包。你负责把复杂讨论讲得更顺、更贴近日常理解。钻研模式下可以举例和追问，但不要把问题说散。",
         },
     },
     "abstract": {
@@ -100,7 +103,13 @@ MODE_PRESETS = {
             "chatgpt": "你是 ChatGPT。抽象模式下你负责让怪话仍然好懂：可以玩梗、调侃、用网络语气接话，但别硬堆热词。回答要像聊天里的抽象段子，不要列清单，不要写方案。",
             "deepseek": "你是 DeepSeek。抽象模式下你可以更直接、更损一点，用接地气的怪比喻、反差吐槽和短句推进话题。要好笑但不恶意，不要把抽象变成骂人或阴阳怪气。",
             "zhipu": "你是智谱。抽象模式下你负责发散梗感和画面感：把用户话题拐成有点离谱但能看懂的场景、梗图感描述或网络怪话。保持轻快，不要故弄玄虚。",
+            "doubao": "你是豆包。抽象模式下你负责把怪话接成像群聊里自然冒出来的梗：轻松、口语、有反差，但别硬堆网络热词。",
         },
+    },
+    "custom": {
+        "label": "复杂定制",
+        "goal": "根据用户填写的复杂需求，为每个 AI 分配不同的角色、技能、昵称和头像，并围绕这个场景协作对话。",
+        "prompts": {},
     },
 }
 
@@ -473,6 +482,93 @@ def save_config_from_payload(payload, username=None):
     return config
 
 
+def extract_json_object(text):
+    text = (text or "").strip()
+    text = re.sub(r"^```(?:json)?\s*", "", text)
+    text = re.sub(r"\s*```$", "", text)
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        start = text.find("{")
+        end = text.rfind("}")
+        if start >= 0 and end > start:
+            return json.loads(text[start:end + 1])
+        raise
+
+
+def customize_complex_scenario(payload, username=None):
+    description = (payload.get("description") or "").strip()
+    if not description:
+        return {"ok": False, "error": "请先填写复杂场景需求"}, 400
+
+    load_dotenv(FOLDER / ".env", override=True)
+    config = save_config_from_payload(payload.get("config", {}), username)
+    deepseek = next((model for model in config.get("models", []) if model.get("id") == "deepseek"), None)
+    if not deepseek:
+        return {"ok": False, "error": "没有找到 DeepSeek，无法生成复杂定制"}, 400
+    caller = PROVIDER_CALLERS.get(deepseek.get("provider"))
+    if not caller:
+        return {"ok": False, "error": f"DeepSeek provider 不支持: {deepseek.get('provider')}"}, 400
+
+    roster = [
+        {
+            "id": model.get("id"),
+            "current_name": model.get("name"),
+            "current_avatar": model.get("avatar"),
+            "provider": model.get("provider"),
+            "model": model.get("model"),
+        }
+        for model in config.get("models", [])
+    ]
+    planner_prompt = (
+        "你是一个多 AI 场景编排器。用户会给出复杂对话需求，你要为每个 AI 分配不同 skill/persona，"
+        "并给出适合这个场景的昵称和短头像。必须只输出 JSON，不要解释。\n\n"
+        "JSON 格式：\n"
+        "{\n"
+        '  "conversation_goal": "这次对话的总体目标",\n'
+        '  "models": [\n'
+        '    {"id": "模型 id", "name": "昵称", "avatar": "1-2个汉字或短英文", "speaker_weight": 1.0, "system_prompt": "完整人格/skill设定"}\n'
+        "  ]\n"
+        "}\n\n"
+        "要求：\n"
+        "- 必须覆盖给定 roster 里的每个 id，不要创造新 id。\n"
+        "- 每个 AI 的 skill 要明显不同，能协作又不会重复。\n"
+        "- system_prompt 要可直接作为该 AI 的系统提示词，使用中文。\n"
+        "- avatar 不要用图片 URL。\n\n"
+        f"用户复杂需求：{description}\n\n"
+        f"AI roster：{json.dumps(roster, ensure_ascii=False)}"
+    )
+
+    try:
+        raw = caller(deepseek, planner_prompt, 1800)
+        plan = extract_json_object(raw)
+    except Exception as exc:
+        return {"ok": False, "error": f"复杂定制生成失败: {compact_call_error(exc)}"}, 500
+
+    assignments = {item.get("id"): item for item in plan.get("models", []) if item.get("id")}
+    if not assignments:
+        return {"ok": False, "error": "DeepSeek 没有返回可用的人格分配"}, 500
+
+    config["dialogue_mode"] = "custom"
+    config["conversation_goal"] = (plan.get("conversation_goal") or description).strip()
+    for model in config.get("models", []):
+        update = assignments.get(model.get("id"))
+        if not update:
+            continue
+        for field in ("name", "avatar", "system_prompt"):
+            if (update.get(field) or "").strip():
+                model[field] = update[field].strip()
+        if "speaker_weight" in update:
+            try:
+                model["speaker_weight"] = max(0.1, min(5, float(update["speaker_weight"])))
+            except (TypeError, ValueError):
+                pass
+
+    cfg_file, _log, _md, _exp = user_file_paths(username)
+    save_json(cfg_file, config)
+    return {"ok": True, "config": public_config(username)}, 200
+
+
 def current_status(username=None):
     if MULTI_USER and username:
         with RUNNER_LOCK:
@@ -638,7 +734,7 @@ def start_dialogue(payload, username=None):
     config = save_config_from_payload(payload.get("config", {}), username)
     prompt = (payload.get("prompt") or "").strip()
     reset = bool(payload.get("reset", True))
-    rounds = int(payload.get("rounds") or config.get("max_rounds", 1))
+    rounds = int(payload.get("rounds") or config.get("max_rounds", 5))
     _cfg_file, log_file, _md_file, _exp_file = user_file_paths(username)
 
     if reset and not prompt:
@@ -863,10 +959,11 @@ class PanelHandler(BaseHTTPRequestHandler):
                     "OPENAI_API_KEY_set": bool(os.environ.get("OPENAI_API_KEY", "").strip()),
                     "DEEPSEEK_API_KEY_set": bool(os.environ.get("DEEPSEEK_API_KEY", "").strip()),
                     "ZHIPU_API_KEY_set": bool(os.environ.get("ZHIPU_API_KEY", "").strip()),
+                    "DOUBAO_API_KEY_set": bool(os.environ.get("DOUBAO_API_KEY", "").strip()),
                     "PORT": os.environ.get("PORT", ""),
                     "total_env_count": len(os.environ),
                     "all_env_keys": sorted(k for k in os.environ if any(
-                        keyword in k.lower() for keyword in ["panel", "api", "key", "claude", "openai", "deepseek", "zhipu", "bigmodel", "glm", "chatgpt"]
+                        keyword in k.lower() for keyword in ["panel", "api", "key", "claude", "openai", "deepseek", "zhipu", "bigmodel", "glm", "doubao", "volc", "ark", "chatgpt"]
                     )),
                 },
             )
@@ -915,6 +1012,9 @@ class PanelHandler(BaseHTTPRequestHandler):
             payload = read_json_body(self)
             if path == "/api/config":
                 response_json(self, save_config_from_payload(payload, username))
+            elif path == "/api/customize":
+                data, status = customize_complex_scenario(payload, username)
+                response_json(self, data, status)
             elif path == "/api/start":
                 data, status = start_dialogue(payload, username)
                 response_json(self, data, status)
@@ -1109,6 +1209,14 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       justify-content: center;
       gap: 7px;
       white-space: nowrap;
+    }
+    .tool-button small {
+      display: block;
+      margin-top: 1px;
+      font-size: 10px;
+      line-height: 1;
+      color: var(--muted);
+      font-weight: 700;
     }
     .icon {
       width: 18px;
@@ -1422,6 +1530,35 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     .login-card label { margin-bottom: 12px; }
     .login-card .error { color: var(--danger); font-size: 13px; min-height: 20px; margin-bottom: 12px; }
     .login-card button { width: 100%; }
+    .custom-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 90;
+      align-items: center;
+      justify-content: center;
+      padding: 18px;
+      background: rgba(15, 23, 42, .48);
+    }
+    .custom-overlay.show { display: flex; }
+    .custom-dialog {
+      width: min(560px, 100%);
+      background: var(--panel);
+      border-radius: 10px;
+      border: 1px solid var(--line);
+      box-shadow: 0 22px 54px rgba(15, 23, 42, .24);
+      padding: 18px;
+      display: grid;
+      gap: 12px;
+    }
+    .custom-dialog h2 { margin: 0; font-size: 18px; }
+    .custom-dialog textarea { min-height: 150px; }
+    .custom-dialog .error { color: var(--danger); font-size: 13px; min-height: 18px; }
+    .custom-actions {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
     .privacy-note {
       text-align: center;
       font-size: 11px;
@@ -1452,6 +1589,20 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       <p class="privacy-note">你的聊天记录仅自己可见，开发者不会、也无法查看。</p>
     </div>
   </div>
+  <div id="customOverlay" class="custom-overlay">
+    <div class="custom-dialog">
+      <h2>复杂场景定制</h2>
+      <label>
+        需求描述
+        <textarea id="customDescription" placeholder="写下你希望这组 AI 扮演的复杂场景、协作方式、语气和目标"></textarea>
+      </label>
+      <div class="error" id="customError"></div>
+      <div class="custom-actions">
+        <button class="secondary" type="button" onclick="closeCustomDialog()">取消</button>
+        <button type="button" id="customSubmitBtn" onclick="submitCustomScenario()">生成分工</button>
+      </div>
+    </div>
+  </div>
   <header>
     <h1>多 AI 对话控制台</h1>
     <div class="status">
@@ -1476,6 +1627,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
               <option value="work">工作</option>
               <option value="study">钻研</option>
               <option value="abstract">抽象</option>
+              <option value="custom">复杂定制</option>
             </select>
           </label>
           <button class="secondary tool-button" type="button" onclick="applyModePreset()"><span class="icon">+</span><span>套用人格</span></button>
@@ -1488,7 +1640,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       <div class="settings-grid">
         <label>
           轮数
-          <input id="rounds" type="number" min="1" max="20" value="1" />
+          <input id="rounds" type="number" min="1" max="20" value="5" />
         </label>
         <label>
           发言方式
@@ -1509,11 +1661,11 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         </label>
         <label>
           连续发言上限
-          <input id="maxConsecutive" type="number" min="1" max="5" value="1" />
+          <input id="maxConsecutive" type="number" min="1" max="5" value="2" />
         </label>
         <label>
           自我记忆
-          <input id="selfMemoryTurns" type="number" min="0" max="20" value="5" />
+          <input id="selfMemoryTurns" type="number" min="0" max="100" value="30" />
         </label>
         <label>
           发言字数
@@ -1536,7 +1688,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         </label>
       </div>
       <div class="buttons">
-        <button class="secondary tool-button" id="continueBtn" onclick="continueDialogue()"><span class="icon">↻</span><span>继续</span></button>
+        <button class="secondary tool-button" id="continueBtn" onclick="continueDialogue()"><span class="icon">↻</span><span>继续<small>无输入</small></span></button>
         <button class="secondary tool-button" id="stopBtn" onclick="stopDialogue()"><span class="icon">■</span><span id="stopLabel">停止</span></button>
         <button class="danger tool-button" onclick="clearDialogue()"><span class="icon">×</span><span>清空</span></button>
       </div>
@@ -1677,6 +1829,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       chatgpt: { avatar: 'GPT', color: '#16856b', soft: '#ecfdf5' },
       deepseek: { avatar: 'DS', color: '#2563eb', soft: '#eff6ff' },
       zhipu: { avatar: '智', color: '#7c3aed', soft: '#f5f3ff' },
+      doubao: { avatar: '豆', color: '#db2777', soft: '#fdf2f8' },
     };
 
     function getConfiguredModel(id) {
@@ -1712,11 +1865,11 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
     async function loadConfig() {
       config = await api('/api/config');
-      document.getElementById('rounds').value = config.max_rounds || 1;
+      document.getElementById('rounds').value = config.max_rounds || 5;
       document.getElementById('turnMode').value = config.turn_mode || 'fixed';
       document.getElementById('delay').value = String(config.delay_seconds ?? 1);
-      document.getElementById('maxConsecutive').value = config.max_consecutive_turns || 1;
-      document.getElementById('selfMemoryTurns').value = config.self_memory_turns ?? 5;
+      document.getElementById('maxConsecutive').value = config.max_consecutive_turns || 2;
+      document.getElementById('selfMemoryTurns').value = config.self_memory_turns ?? 30;
       document.getElementById('dialogueMode').value = config.dialogue_mode || 'work';
       document.getElementById('goal').value = config.conversation_goal || '';
       document.getElementById('maxTokens').value = config.max_output_tokens || 1200;
@@ -1770,6 +1923,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
     function applyModePreset() {
       const mode = document.getElementById('dialogueMode').value;
+      if (mode === 'custom') {
+        openCustomDialog();
+        return;
+      }
       const preset = config.mode_presets?.[mode];
       if (!preset) return;
       config.dialogue_mode = mode;
@@ -1780,6 +1937,49 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       }));
       document.getElementById('goal').value = config.conversation_goal;
       renderModels();
+    }
+
+    function openCustomDialog() {
+      document.getElementById('customOverlay').classList.add('show');
+      document.getElementById('customError').textContent = '';
+      setTimeout(() => document.getElementById('customDescription').focus(), 30);
+    }
+
+    function closeCustomDialog() {
+      document.getElementById('customOverlay').classList.remove('show');
+      if (config) document.getElementById('dialogueMode').value = config.dialogue_mode || 'chat';
+    }
+
+    async function submitCustomScenario() {
+      const description = document.getElementById('customDescription').value.trim();
+      const errorEl = document.getElementById('customError');
+      const submitBtn = document.getElementById('customSubmitBtn');
+      errorEl.textContent = '';
+      if (!description) {
+        errorEl.textContent = '请先填写需求描述';
+        return;
+      }
+      submitBtn.disabled = true;
+      submitBtn.textContent = '生成中';
+      try {
+        const data = await api('/api/customize', {
+          method: 'POST',
+          body: JSON.stringify({ description, config: collectConfig() }),
+        });
+        config = data.config;
+        document.getElementById('customOverlay').classList.remove('show');
+        document.getElementById('dialogueMode').value = config.dialogue_mode || 'custom';
+        document.getElementById('goal').value = config.conversation_goal || '';
+        document.getElementById('rounds').value = config.max_rounds || 5;
+        document.getElementById('maxConsecutive').value = config.max_consecutive_turns || 2;
+        document.getElementById('selfMemoryTurns').value = config.self_memory_turns ?? 30;
+        renderModels();
+      } catch (error) {
+        errorEl.textContent = error.message;
+      } finally {
+        submitBtn.disabled = false;
+        submitBtn.textContent = '生成分工';
+      }
     }
 
     function syncTurnModeUi() {
@@ -1800,12 +2000,12 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         };
       });
       return {
-        max_rounds: Number(document.getElementById('rounds').value || 1),
+        max_rounds: Number(document.getElementById('rounds').value || 5),
         turn_mode: document.getElementById('turnMode').value,
         natural_selector: 'all',
         delay_seconds: Number(document.getElementById('delay').value || 0),
-        max_consecutive_turns: Number(document.getElementById('maxConsecutive').value || 1),
-        self_memory_turns: Number(document.getElementById('selfMemoryTurns').value || 0),
+        max_consecutive_turns: Number(document.getElementById('maxConsecutive').value || 2),
+        self_memory_turns: Number(document.getElementById('selfMemoryTurns').value || 30),
         max_output_tokens: Number(document.getElementById('maxTokens').value || 1200),
         response_min_chars: Number(document.getElementById('minChars').value || 0),
         response_max_chars: Number(document.getElementById('maxChars').value || 220),
@@ -1820,7 +2020,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       try {
         const payload = {
           prompt: prompt || '',
-          rounds: Number(document.getElementById('rounds').value || 1),
+          rounds: Number(document.getElementById('rounds').value || 5),
           reset,
           config: collectConfig(),
         };
@@ -1869,7 +2069,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       try {
         const status = await api('/api/status');
         if (!status.running) {
-          await runDialogue(true, content);
+          await runDialogue(!hasMessages, content);
         } else {
           await api('/api/interject', { method: 'POST', body: JSON.stringify({ content }) });
           await refreshDialogue();
@@ -1891,7 +2091,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     function bindKeyboardShortcuts() {
       document.addEventListener('click', closeExportMenu);
       document.addEventListener('keydown', event => {
-        if (event.key === 'Escape') closeExportMenu();
+        if (event.key === 'Escape') {
+          closeExportMenu();
+          if (document.getElementById('customOverlay').classList.contains('show')) closeCustomDialog();
+        }
       });
       document.getElementById('turnMode').addEventListener('change', syncTurnModeUi);
 
@@ -2079,7 +2282,7 @@ LITE_TEMPLATE = r"""<!DOCTYPE html>
   <main>
     <textarea id="prompt" placeholder="输入提示词"></textarea>
     <div class="bar">
-      <input id="rounds" type="number" min="1" max="20" value="1" />
+      <input id="rounds" type="number" min="1" max="20" value="5" />
       <button onclick="startDialogue()">开始</button>
     </div>
     <button onclick="refreshAll()">刷新</button>
@@ -2159,7 +2362,7 @@ LITE_TEMPLATE = r"""<!DOCTYPE html>
       const config = await api('/api/config');
       const payload = {
         prompt: document.getElementById('prompt').value.trim(),
-        rounds: Number(document.getElementById('rounds').value || 1),
+        rounds: Number(document.getElementById('rounds').value || 5),
         reset: true,
         config
       };

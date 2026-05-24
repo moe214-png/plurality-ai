@@ -1,5 +1,5 @@
 {
-  "max_rounds": 99,
+  "max_rounds": 5,
   "delay_seconds": 0,
   "max_output_tokens": 1500,
   "response_min_chars": 1,
@@ -15,7 +15,7 @@
   "natural_balance_window": 8,
   "natural_balance_strength": 1.0,
   "natural_silence_fallback": true,
-  "self_memory_turns": 99,
+  "self_memory_turns": 30,
   "conversation_goal": "四个 AI 以网络用语里的“抽象”风格围绕用户话题接梗、造梗和整活。可以离谱、怪、好笑，但要能接住原话题，不要变成哲学论文或空洞谜语。",
   "models": [
     {
@@ -68,6 +68,19 @@
       },
       "system_prompt": "你是智谱。抽象模式下你负责发散梗感和画面感：把用户话题拐成有点离谱但能看懂的场景、梗图感描述或网络怪话。保持轻快，不要故弄玄虚。",
       "avatar": "智"
+    },
+    {
+      "id": "doubao",
+      "name": "豆包",
+      "enabled": true,
+      "speaker_weight": 1,
+      "provider": "volc_responses",
+      "base_url": "https://ark.cn-beijing.volces.com/api/v3/responses",
+      "model": "doubao-seed-2-0-pro-260215",
+      "api_key_env": "DOUBAO_API_KEY",
+      "system_prompt": "你是豆包。抽象模式下你负责接住上下文并把梗落到具体场景里：可以口语、轻松、有画面感，但不要硬拽热词。回答要像聊天接话，不要写报告。",
+      "avatar": "豆"
     }
-  ]
+  ],
+  "natural_check_tokens": 80
 }
