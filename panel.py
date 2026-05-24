@@ -26,6 +26,7 @@ from urllib.parse import quote, urlparse
 
 from api_dialogue import (
     CONFIG_FILE,
+    DEFAULT_CONFIG,
     LOG_FILE,
     MARKDOWN_FILE,
     PROVIDER_CALLERS,
@@ -452,9 +453,14 @@ def apply_mode_preset(config, mode):
     preset = MODE_PRESETS.get(mode)
     if not preset:
         return config
+    default_models = {model.get("id"): model for model in DEFAULT_CONFIG.get("models", [])}
     config["dialogue_mode"] = mode
     config["conversation_goal"] = preset["goal"]
     for model in config.get("models", []):
+        default_model = default_models.get(model.get("id"))
+        if default_model:
+            model["name"] = default_model.get("name", model.get("name"))
+            model["avatar"] = default_model.get("avatar", model.get("avatar"))
         prompt = preset["prompts"].get(model.get("id"))
         if prompt:
             model["system_prompt"] = prompt
@@ -1894,6 +1900,13 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       zhipu: { avatar: '智', color: '#7c3aed', soft: '#f5f3ff' },
       doubao: { avatar: '豆', color: '#db2777', soft: '#fdf2f8' },
     };
+    const defaultProfiles = {
+      claude: { name: 'Claude', avatar: 'CL' },
+      chatgpt: { name: 'ChatGPT', avatar: 'GPT' },
+      deepseek: { name: 'DeepSeek', avatar: 'DS' },
+      zhipu: { name: '智谱', avatar: '智' },
+      doubao: { name: '豆包', avatar: '豆' },
+    };
 
     function getConfiguredModel(id) {
       return config?.models?.find(model => String(model.id).toLowerCase() === String(id).toLowerCase());
@@ -1996,6 +2009,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       config.conversation_goal = preset.goal;
       config.models = config.models.map(model => ({
         ...model,
+        name: defaultProfiles[model.id]?.name || model.name,
+        avatar: defaultProfiles[model.id]?.avatar || model.avatar,
         system_prompt: preset.prompts?.[model.id] || model.system_prompt,
       }));
       document.getElementById('goal').value = config.conversation_goal;
