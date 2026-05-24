@@ -47,7 +47,7 @@ DEFAULT_CONFIG = {
     "natural_selector": "all",
     "natural_pick_strategy": "sample",
     "natural_judge_model_id": "deepseek",
-    "natural_check_tokens": 80,
+    "natural_check_tokens": 200,
     "natural_fallback_seconds": 4.5,
     "max_consecutive_turns": 2,
     "natural_balance_enabled": True,
@@ -794,9 +794,9 @@ def choose_natural_speaker(config, log, max_tokens=None):
             raw = caller(check_config, check_prompt, check_tokens)
             score, reason = parse_speak_score(raw)
         except Exception as exc:
-            score, reason = 0, f"判断失败: {compact_call_error(exc)}"
+            score, reason = 1, f"判断跳过（{compact_call_error(exc)}），给机会发言"
         bonus = balance_bonus(config, log, model_config["id"], allowed)
-        effective_score = weighted_score(model_config, score + bonus) if score > 0 else 0
+        effective_score = weighted_score(model_config, max(score, 1) + bonus)
         decisions.append(
             {
                 "model": model_config,
