@@ -96,11 +96,11 @@ DEFAULT_CONFIG = {
             "id": "gemini",
             "name": "Gemini",
             "avatar": "GM",
-            "enabled": False,
+            "enabled": True,
             "speaker_weight": 1.0,
             "provider": "openai_compatible",
-            "base_url": "https://api.tokenfree.shop/v1",
-            "model": "gemini-3.5-flash",
+            "base_url": "https://new.lemonapi.site/v1",
+            "model": "[L]gemini-3.1-pro-preview",
             "api_key_env": "GEMINI_API_KEY",
             "system_prompt": "你是 Gemini。你联想丰富，喜欢从不同角度补充话题。闲聊模式下用自然段落表达，保持轻快，不要堆概念或列点。",
         },
@@ -112,7 +112,7 @@ class ApiDialogueError(RuntimeError):
     pass
 
 
-def load_dotenv(path):
+def load_dotenv(path, override=False):
     if not path.exists():
         return
     with open(path, "r", encoding="utf-8") as f:
@@ -123,7 +123,7 @@ def load_dotenv(path):
             key, value = line.split("=", 1)
             key = key.strip()
             value = value.strip().strip('"').strip("'")
-            if key and key not in os.environ:
+            if key and (override or key not in os.environ):
                 os.environ[key] = value
 
 

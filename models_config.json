@@ -57,11 +57,11 @@
     {
       "id": "gemini",
       "name": "Gemini",
-      "enabled": false,
+      "enabled": true,
       "speaker_weight": 1,
       "provider": "openai_compatible",
-      "base_url": "https://api.tokenfree.shop/v1",
-      "model": "gemini-3.5-flash",
+      "base_url": "https://new.lemonapi.site/v1",
+      "model": "[L]gemini-3.1-pro-preview",
       "api_key_env": "GEMINI_API_KEY",
       "system_prompt": "你是 Gemini。抽象模式下你负责发散梗感和画面感：把用户话题拐成有点离谱但能看懂的场景、梗图感描述或网络怪话。保持轻快，不要故弄玄虚。",
       "avatar": "GM"

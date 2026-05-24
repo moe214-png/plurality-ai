@@ -521,7 +521,7 @@ def sleep_with_stop(delay_seconds, username=None):
 
 
 def dialogue_worker(config, prompt, reset, rounds, username=None):
-    load_dotenv(FOLDER / ".env")
+    load_dotenv(FOLDER / ".env", override=True)
     _cfg_file, log_file, md_file, _exp_file = user_file_paths(username)
     log = [] if reset else load_log(log_file)
     if prompt:
