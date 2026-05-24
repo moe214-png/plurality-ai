@@ -773,7 +773,7 @@ def choose_natural_speaker(config, log, max_tokens=None):
     allowed, decisions = natural_allowed_models(config, log, candidates)
     if not allowed:
         return None, decisions
-    check_tokens = int(max_tokens or config.get("natural_check_tokens", 80))
+    check_tokens = int(max_tokens or config.get("natural_check_tokens", 200))
     try:
         fallback_seconds = max(0.5, float(config.get("natural_fallback_seconds", 4.5)))
     except (TypeError, ValueError):
@@ -781,15 +781,14 @@ def choose_natural_speaker(config, log, max_tokens=None):
     deadline = time.monotonic() + fallback_seconds
     for model_config in allowed:
         remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            break
         caller = PROVIDER_CALLERS.get(model_config.get("provider"))
         if not caller:
+            decisions.append({"model": model_config, "score": 1, "reason": "不支持的 provider，给基础分"})
             continue
         try:
             check_prompt = build_natural_check_prompt(config, log, model_config)
             check_config = dict(model_config)
-            check_config["request_timeout"] = max(0.5, remaining)
+            check_config["request_timeout"] = max(1.5, remaining) if remaining > 0 else 3
             check_config["request_retries"] = 0
             raw = caller(check_config, check_prompt, check_tokens)
             score, reason = parse_speak_score(raw)
@@ -808,6 +807,15 @@ def choose_natural_speaker(config, log, max_tokens=None):
                 ),
             }
         )
+
+    # 被最近消息点名提及的模型优先发言
+    mentioned = mentioned_models(config, log, lookback=3)
+    mentioned_ids = {m.get("id") for m in mentioned}
+    if mentioned_ids:
+        for item in decisions:
+            if item["model"].get("id") in mentioned_ids:
+                item["score"] += 3
+                item["reason"] = "被点名提及，优先发言 | " + item["reason"]
 
     chosen_decision = pick_decision(config, decisions)
     decisions.sort(key=lambda item: item["score"], reverse=True)
