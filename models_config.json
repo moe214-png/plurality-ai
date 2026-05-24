@@ -82,5 +82,6 @@
       "avatar": "豆"
     }
   ],
-  "natural_check_tokens": 80
+  "natural_check_tokens": 80,
+  "natural_fallback_seconds": 2.5
 }

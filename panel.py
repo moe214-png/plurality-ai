@@ -12,6 +12,7 @@ import hashlib
 import io
 import json
 import os
+import random
 import re
 import secrets
 import socket
@@ -644,13 +645,19 @@ def dialogue_worker(config, prompt, reset, rounds, username=None):
 
     try:
         if turn_mode == "natural":
-            total_steps = rounds * len(enabled_models(config))
+            enabled = enabled_models(config)
+            total_steps = rounds * len(enabled)
+            first_cycle = random.sample(enabled, len(enabled)) if prompt else []
             for _step in range(total_steps):
                 if current_status(username).get("stop_requested"):
                     return
                 log = load_log(log_file)
-                set_status(username, current_model="选择发言者")
-                model_config, _decisions = choose_next_natural_speaker(config, log)
+                if _step < len(first_cycle):
+                    model_config = first_cycle[_step]
+                    set_status(username, current_model=f"随机轮流：{model_config.get('name')}")
+                else:
+                    set_status(username, current_model="选择发言者")
+                    model_config, _decisions = choose_next_natural_speaker(config, log)
                 if not model_config:
                     set_status(username, last_error="没有 AI 想继续发言")
                     return

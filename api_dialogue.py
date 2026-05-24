@@ -48,6 +48,7 @@ DEFAULT_CONFIG = {
     "natural_pick_strategy": "sample",
     "natural_judge_model_id": "deepseek",
     "natural_check_tokens": 80,
+    "natural_fallback_seconds": 2.5,
     "max_consecutive_turns": 2,
     "natural_balance_enabled": True,
     "natural_balance_window": 8,
@@ -240,6 +241,20 @@ def http_json(method, url, headers, payload=None, timeout=120, retries=2):
     raise last_error or ApiDialogueError(f"Request failed calling {url}")
 
 
+def request_timeout(model_config, default=120):
+    try:
+        return max(0.5, float(model_config.get("request_timeout", default)))
+    except (TypeError, ValueError):
+        return default
+
+
+def request_retries(model_config, default=2):
+    try:
+        return max(0, int(model_config.get("request_retries", default)))
+    except (TypeError, ValueError):
+        return default
+
+
 def compact_call_error(error):
     text = str(error)
     text_lower = text.lower()
@@ -360,6 +375,8 @@ def call_openai(model_config, prompt, max_tokens):
             "Content-Type": "application/json",
         },
         payload,
+        timeout=request_timeout(model_config),
+        retries=request_retries(model_config),
     )
     if data.get("output_text"):
         return data["output_text"].strip()
@@ -391,6 +408,8 @@ def call_anthropic(model_config, prompt, max_tokens):
             "Content-Type": "application/json",
         },
         payload,
+        timeout=request_timeout(model_config),
+        retries=request_retries(model_config),
     )
     chunks = [item.get("text", "") for item in data.get("content", []) if item.get("type") == "text"]
     if chunks:
@@ -420,6 +439,8 @@ def call_openai_compatible(model_config, prompt, max_tokens):
             "Content-Type": "application/json",
         },
         payload,
+        timeout=request_timeout(model_config),
+        retries=request_retries(model_config),
     )
     try:
         return data["choices"][0]["message"]["content"].strip()
@@ -466,6 +487,8 @@ def call_volc_responses(model_config, prompt, max_tokens):
             "Content-Type": "application/json",
         },
         payload,
+        timeout=request_timeout(model_config),
+        retries=request_retries(model_config),
     )
     text = extract_responses_text(data)
     if text:
@@ -499,6 +522,8 @@ def call_gemini(model_config, prompt, max_tokens):
             "x-goog-api-key": api_key,
         },
         payload,
+        timeout=request_timeout(model_config),
+        retries=request_retries(model_config),
     )
     chunks = []
     for candidate in data.get("candidates", []):
@@ -644,22 +669,7 @@ def weighted_score(model_config, score):
 def fallback_natural_speaker(config, log, allowed, decisions, reason="无人主动发言，兜底接话"):
     if not allowed or not config.get("natural_silence_fallback", True):
         return None, decisions
-    ranked = sorted(
-        allowed,
-        key=lambda model: (
-            balance_bonus(config, log, model["id"], allowed),
-            -next(
-                (
-                    index
-                    for index, item in enumerate(reversed(log))
-                    if item.get("role") == "assistant" and item.get("model_id") == model["id"]
-                ),
-                10_000,
-            ),
-        ),
-        reverse=True,
-    )
-    chosen = ranked[0]
+    chosen = random.choice(allowed)
     decisions.append({"model": chosen, "score": 0.1, "reason": reason})
     return chosen, decisions
 
@@ -697,21 +707,33 @@ def choose_natural_speaker(config, log, max_tokens=None):
     if not allowed:
         return None, decisions
     check_tokens = int(max_tokens or config.get("natural_check_tokens", 80))
+    try:
+        fallback_seconds = max(0.5, float(config.get("natural_fallback_seconds", 2.5)))
+    except (TypeError, ValueError):
+        fallback_seconds = 2.5
+    deadline = time.monotonic() + fallback_seconds
     for model_config in allowed:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
         caller = PROVIDER_CALLERS.get(model_config.get("provider"))
         if not caller:
             continue
         try:
             check_prompt = build_natural_check_prompt(config, log, model_config)
-            raw = caller(model_config, check_prompt, check_tokens)
+            check_config = dict(model_config)
+            check_config["request_timeout"] = max(0.5, remaining)
+            check_config["request_retries"] = 0
+            raw = caller(check_config, check_prompt, check_tokens)
             score, reason = parse_speak_score(raw)
         except Exception as exc:
-            score, reason = 0, f"判断失败: {exc}"
+            score, reason = 0, f"判断失败: {compact_call_error(exc)}"
         bonus = balance_bonus(config, log, model_config["id"], allowed)
+        effective_score = weighted_score(model_config, score + bonus) if score > 0 else 0
         decisions.append(
             {
                 "model": model_config,
-                "score": weighted_score(model_config, score + bonus),
+                "score": effective_score,
                 "reason": (
                     reason
                     if bonus == 0 and speaker_weight(model_config) == 1
@@ -723,7 +745,7 @@ def choose_natural_speaker(config, log, max_tokens=None):
     chosen_decision = pick_decision(config, decisions)
     decisions.sort(key=lambda item: item["score"], reverse=True)
     if not chosen_decision:
-        return fallback_natural_speaker(config, log, allowed, decisions)
+        return fallback_natural_speaker(config, log, allowed, decisions, reason=f"{fallback_seconds:g} 秒内无人明确抢话，随机接话")
     return chosen_decision["model"], decisions
 
 
@@ -830,9 +852,9 @@ def choose_natural_speaker_by_judge(config, log, max_tokens=None):
 
 
 def choose_next_natural_speaker(config, log, max_tokens=None):
-    if config.get("natural_selector", "all") == "all":
-        return choose_natural_speaker(config, log, max_tokens)
-    return choose_natural_speaker_by_judge(config, log, max_tokens)
+    if config.get("natural_selector", "all") == "judge":
+        return choose_natural_speaker_by_judge(config, log, max_tokens)
+    return choose_natural_speaker(config, log, max_tokens)
 
 
 def append_entry(log, role, content, model_config=None):
@@ -896,12 +918,18 @@ def run_dialogue(config, prompt=None, prompt_file=None, rounds=None, reset=False
     turn_mode = config.get("turn_mode", "fixed")
 
     if turn_mode == "natural":
-        total_steps = total_rounds * len(enabled_models(config))
+        enabled = enabled_models(config)
+        total_steps = total_rounds * len(enabled)
+        first_cycle = random.sample(enabled, len(enabled)) if prompt else []
         for step_index in range(total_steps):
             print(f"\n=== 自然发言 {step_index + 1}/{total_steps} ===")
-            model_config, decisions = choose_next_natural_speaker(config, log)
-            for decision in decisions:
-                print(f"  {decision['model']['name']}: {decision['score']} ({decision['reason']})")
+            if step_index < len(first_cycle):
+                model_config = first_cycle[step_index]
+                print(f"  首轮随机轮流: {model_config['name']}")
+            else:
+                model_config, decisions = choose_next_natural_speaker(config, log)
+                for decision in decisions:
+                    print(f"  {decision['model']['name']}: {decision['score']} ({decision['reason']})")
             if not model_config:
                 print("没有 AI 想继续发言，已停止。")
                 break
