@@ -1623,6 +1623,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       <span><i id="runDot" class="dot"></i> <span id="runText">待机</span></span>
       <span id="currentModel">当前模型：-</span>
       <span id="progressText">进度：0/0</span>
+      <span id="lastError" style="display:none;color:var(--danger);max-width:360px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></span>
       <span class="user-info" id="userSection" style="display:none;">
         <span class="username" id="currentUser"></span>
         <button class="secondary tool-button" onclick="logout()" style="padding:4px 10px;font-size:12px;">登出</button>
@@ -1806,6 +1807,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         document.getElementById('runText').textContent = '待机';
         document.getElementById('currentModel').textContent = '当前模型：-';
         document.getElementById('progressText').textContent = '进度：0/0';
+        document.getElementById('lastError').style.display = 'none';
     }
 
     function startPolling() {
@@ -2134,6 +2136,14 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       document.getElementById('runText').textContent = showStopped ? '已停止' : (status.stop_requested ? '停止中' : (status.running ? '运行' : '待机'));
       document.getElementById('currentModel').textContent = status.running ? '' : '当前模型：-';
       document.getElementById('progressText').textContent = `进度：${status.completed_calls || 0}/${status.total_calls || 0}`;
+      const errorEl = document.getElementById('lastError');
+      if (status.last_error) {
+        errorEl.textContent = status.last_error;
+        errorEl.style.display = '';
+      } else {
+        errorEl.textContent = '';
+        errorEl.style.display = 'none';
+      }
       document.getElementById('continueBtn').disabled = status.running;
       document.getElementById('stopBtn').disabled = !status.running || status.stop_requested;
       document.getElementById('stopLabel').textContent = showStopped ? '已停止' : (status.stop_requested ? '停止中' : '停止');
