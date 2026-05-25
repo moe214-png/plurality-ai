@@ -16,7 +16,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 
@@ -24,6 +24,12 @@ FOLDER = Path(__file__).resolve().parent
 CONFIG_FILE = FOLDER / "models_config.json"
 LOG_FILE = FOLDER / "api_dialogue_log.json"
 MARKDOWN_FILE = FOLDER / "api_dialogue.md"
+
+CHINA_TZ = timezone(timedelta(hours=8))
+
+
+def now_china():
+    return datetime.now(CHINA_TZ).replace(tzinfo=None)
 RETRYABLE_HTTP_STATUS = {408, 409, 425, 429, 500, 502, 503, 504}
 RETRYABLE_NETWORK_MARKERS = (
     "UNEXPECTED_EOF_WHILE_READING",
@@ -196,7 +202,7 @@ def export_markdown(log, markdown_file=None):
     mf = markdown_file or MARKDOWN_FILE
     with open(mf, "w", encoding="utf-8") as f:
         f.write("# 多 AI API 对话记录\n\n")
-        f.write(f"_最后更新: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}_\n\n")
+        f.write(f"_最后更新: {now_china().strftime('%Y-%m-%d %H:%M:%S')}_\n\n")
         for index, entry in enumerate(log, 1):
             f.write(f"## [{index}] {entry['model_name']}\n")
             f.write(f"**模型**: `{entry['model']}`  \n")
@@ -934,7 +940,7 @@ def choose_next_natural_speaker(config, log, max_tokens=None):
 
 def append_entry(log, role, content, model_config=None):
     entry = {
-        "timestamp": datetime.now().isoformat(timespec="seconds"),
+        "timestamp": now_china().isoformat(timespec="seconds"),
         "role": role,
         "content": content,
     }
@@ -1019,7 +1025,7 @@ def run_dialogue(config, prompt=None, prompt_file=None, rounds=None, reset=False
             if not caller:
                 raise ApiDialogueError(f"Unsupported provider: {provider}")
             prompt_for_model = build_user_prompt(config, log, model_config)
-            print(f"[{datetime.now().strftime('%H:%M:%S')}] Calling {model_config['name']} ({model_config['model']})...")
+            print(f"[{now_china().strftime('%H:%M:%S')}] Calling {model_config['name']} ({model_config['model']})...")
             try:
                 content = caller(model_config, prompt_for_model, max_tokens)
             except Exception as exc:
@@ -1049,7 +1055,7 @@ def run_dialogue(config, prompt=None, prompt_file=None, rounds=None, reset=False
                     raise ApiDialogueError(f"Unsupported provider: {provider}")
 
                 prompt_for_model = build_user_prompt(config, log, model_config)
-                print(f"[{datetime.now().strftime('%H:%M:%S')}] Calling {model_config['name']} ({model_config['model']})...")
+                print(f"[{now_china().strftime('%H:%M:%S')}] Calling {model_config['name']} ({model_config['model']})...")
                 try:
                     content = caller(model_config, prompt_for_model, max_tokens)
                 except Exception as exc:

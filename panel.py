@@ -19,7 +19,7 @@ import socket
 import threading
 import time
 import zipfile
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, urlparse
@@ -51,6 +51,11 @@ load_dotenv(FOLDER / ".env")
 HOST = os.environ.get("PANEL_HOST", "0.0.0.0")
 PORT = int(os.environ.get("PORT") or os.environ.get("PANEL_PORT", "5000"))
 EXPORT_INDEX_FILE = FOLDER / "export_index.json"
+CHINA_TZ = timezone(timedelta(hours=8))
+
+
+def now_china():
+    return datetime.now(CHINA_TZ).replace(tzinfo=None)
 
 # ── Multi-user support (activated by PANEL_MULTI_USER=true) ──────────────
 MULTI_USER = os.environ.get("PANEL_MULTI_USER", "").strip().lower() == "true"
@@ -672,7 +677,7 @@ def export_filename(extension, username=None):
     log = load_log(log_file)
     topic = next((item.get("content", "") for item in log if item.get("role") == "user"), "对话记录")
     topic = safe_filename_part(topic)
-    date_part = datetime.now().strftime("%Y%m%d")
+    date_part = now_china().strftime("%Y%m%d")
     key = f"{topic}_{date_part}"
     try:
         index = json.loads(exp_file.read_text(encoding="utf-8"))
@@ -960,7 +965,7 @@ def dialogue_worker(config, prompt, reset, rounds, username=None):
         running=True,
         stop_requested=False,
         current_model=None,
-        started_at=datetime.now().isoformat(timespec="seconds"),
+        started_at=now_china().isoformat(timespec="seconds"),
         finished_at=None,
         last_error=None,
         completed_calls=0,
@@ -1084,7 +1089,7 @@ def dialogue_worker(config, prompt, reset, rounds, username=None):
             username,
             running=False,
             current_model=None,
-            finished_at=datetime.now().isoformat(timespec="seconds"),
+            finished_at=now_china().isoformat(timespec="seconds"),
         )
 
 
@@ -1186,7 +1191,7 @@ def handle_auth(handler):
     match = next((u for u in users if u.lower() == username.lower()), None)
     created = match is None
     is_first_user = len(users) == 0
-    now = datetime.now().isoformat(timespec="seconds")
+    now = now_china().isoformat(timespec="seconds")
 
     if created:
         match = username
@@ -1281,7 +1286,7 @@ class PanelHandler(BaseHTTPRequestHandler):
             response_text(
                 self,
                 "ok\npanel server is running\n"
-                f"time: {datetime.now().isoformat(timespec='seconds')}\n"
+                f"time: {now_china().isoformat(timespec='seconds')}\n"
                 "try: http://127.0.0.1:5000/lite\n",
             )
         elif path == "/api/config":
@@ -1296,7 +1301,7 @@ class PanelHandler(BaseHTTPRequestHandler):
                 {
                     "messages": messages,
                     "total": len(messages),
-                    "last_update": datetime.now().isoformat(timespec="seconds"),
+                    "last_update": now_china().isoformat(timespec="seconds"),
                 },
             )
         elif path == "/api/status":
@@ -1417,7 +1422,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>多 AI 对话控制台</title>
+  <title>智能虚拟过家家</title>
   <style>
     :root {
       color-scheme: light;
@@ -1431,6 +1436,33 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       --danger: #b42318;
       --ok: #138a43;
       --soft: #eef4ff;
+      --input-bg: #ffffff;
+      --subtle: #fbfcfd;
+      --toolbar: #f8fafc;
+      --chat-bg: #edf2f7;
+      --secondary: #e8edf3;
+      --secondary-hover: #dce4ed;
+      --shadow: rgba(15, 23, 42, .1);
+    }
+    body.dark-mode {
+      color-scheme: dark;
+      --bg: #0f141b;
+      --panel: #161d27;
+      --text: #e5e7eb;
+      --muted: #9aa7b7;
+      --line: #2c3745;
+      --accent: #60a5fa;
+      --accent-dark: #3b82f6;
+      --danger: #f87171;
+      --ok: #34d399;
+      --soft: #17243a;
+      --input-bg: #101720;
+      --subtle: #121a24;
+      --toolbar: #111827;
+      --chat-bg: #0b1118;
+      --secondary: #263241;
+      --secondary-hover: #334155;
+      --shadow: rgba(0, 0, 0, .34);
     }
     * { box-sizing: border-box; }
     body {
@@ -1506,7 +1538,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         border: 1px solid var(--line);
         border-radius: 8px;
         background: var(--panel);
-        box-shadow: 0 8px 18px rgba(15, 23, 42, .1);
+        box-shadow: 0 8px 18px var(--shadow);
       }
       .buttons button { padding: 8px 6px; font-size: 12px; }
       .settings-grid { grid-template-columns: 1fr; }
@@ -1518,8 +1550,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         min-height: 480px;
         max-height: none;
       }
-      .interject { grid-template-columns: 1fr; }
-      .interject button { width: 100%; }
+      .interject { grid-template-columns: 1fr auto; }
+      .interject button { width: auto; }
     }
     section {
       background: var(--panel);
@@ -1543,7 +1575,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       padding: 10px 11px;
       font: inherit;
       color: var(--text);
-      background: #fff;
+      background: var(--input-bg);
     }
     textarea { resize: vertical; min-height: 92px; line-height: 1.5; }
     .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
@@ -1619,8 +1651,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       color: #fff;
     }
     button:hover { background: var(--accent-dark); }
-    button.secondary { background: #e8edf3; color: var(--text); }
-    button.secondary:hover { background: #dce4ed; }
+    button.secondary { background: var(--secondary); color: var(--text); }
+    button.secondary:hover { background: var(--secondary-hover); }
     button.danger { background: var(--danger); }
     button:disabled { opacity: .55; cursor: not-allowed; }
     .models { display: grid; gap: 10px; }
@@ -1630,7 +1662,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       padding: 12px;
       display: grid;
       gap: 10px;
-      background: #fbfcfd;
+      background: var(--subtle);
     }
     .model-head {
       display: flex;
@@ -1705,9 +1737,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       display: grid;
       align-content: start;
       gap: 12px;
-      background: #edf2f7;
+      background: var(--chat-bg);
       min-height: 0;
     }
+    .messages.share-selecting { user-select: none; }
     .share-actions {
       display: none;
       align-items: center;
@@ -1715,7 +1748,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       flex-wrap: wrap;
       border-bottom: 1px solid var(--line);
       padding: 8px 12px;
-      background: #f8fafc;
+      background: var(--toolbar);
     }
     .share-actions.show { display: flex; }
     .share-count {
@@ -1751,7 +1784,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       height: 22px;
       border: 1px solid #b6c3d1;
       border-radius: 50%;
-      background: #fff;
+      background: var(--panel);
       color: transparent;
       align-items: center;
       justify-content: center;
@@ -1835,7 +1868,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       align-items: flex-start;
       gap: 9px;
       padding: 0 14px 12px;
-      background: #edf2f7;
+      background: var(--chat-bg);
       max-width: 100%;
     }
     .typing.show { display: flex; }
@@ -1851,7 +1884,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       max-width: min(78%, 760px);
       border: 1px solid rgba(15, 23, 42, .08);
       border-radius: 17px 17px 17px 5px;
-      background: #fff;
+      background: var(--panel);
       color: var(--muted);
       padding: 8px 12px;
       font-size: 13px;
@@ -1883,9 +1916,16 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       display: grid;
       grid-template-columns: 1fr auto;
       gap: 10px;
+      align-items: end;
       background: var(--panel);
     }
     .interject textarea { min-height: 42px; max-height: 82px; }
+    .interject button {
+      height: 42px;
+      min-height: 42px;
+      align-self: end;
+      padding: 0 14px;
+    }
     .notice {
       color: var(--muted);
       font-size: 13px;
@@ -1894,13 +1934,13 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     .link-button {
       border-radius: 6px;
       padding: 8px 10px;
-      background: #e8edf3;
+      background: var(--secondary);
       color: var(--text);
       text-decoration: none;
       font-weight: 700;
       font-size: 13px;
     }
-    .link-button:hover { background: #dce4ed; }
+    .link-button:hover { background: var(--secondary-hover); }
     .export-menu { position: relative; }
     .export-options {
       position: absolute;
@@ -1910,7 +1950,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       padding: 6px;
       border: 1px solid var(--line);
       border-radius: 8px;
-      background: #fff;
+      background: var(--panel);
       box-shadow: 0 12px 28px rgba(15, 23, 42, .14);
       display: none;
       z-index: 10;
@@ -1927,7 +1967,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       font-size: 13px;
       font-weight: 700;
     }
-    .export-options a:hover { background: #eef2f6; }
+    .export-options a:hover { background: var(--secondary); }
     /* ── Login overlay ── */
     .login-overlay {
       display: none;
@@ -2025,12 +2065,12 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     </div>
   </div>
   <header>
-    <h1>多 AI 对话控制台</h1>
+    <h1>智能虚拟过家家</h1>
     <div class="status">
       <span><i id="runDot" class="dot"></i> <span id="runText">待机</span></span>
       <span id="currentModel">当前模型：-</span>
       <span id="progressText">进度：0/0</span>
-      <span id="lastError" style="display:none;color:var(--danger);max-width:360px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></span>
+      <button class="secondary tool-button" type="button" id="nightModeBtn" onclick="toggleNightMode()" style="padding:4px 10px;font-size:12px;"><span class="icon">☾</span><span>深夜</span></button>
       <span class="user-info" id="userSection" style="display:none;">
         <span class="username" id="currentUser"></span>
         <button class="secondary tool-button" onclick="logout()" style="padding:4px 10px;font-size:12px;">登出</button>
@@ -2169,8 +2209,25 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     let currentDialogueMessages = [];
     let shareSelectionMode = false;
     let selectedShareIndexes = new Set();
+    let shareDragActive = false;
+    let shareDragMoved = false;
+    let sharePointerStartIndex = null;
+    let sharePointerStartX = 0;
+    let sharePointerStartY = 0;
+    let shareSuppressNextClick = false;
 
     // ── Auth ──
+
+    function applyNightMode(enabled) {
+      document.body.classList.toggle('dark-mode', enabled);
+      localStorage.setItem('nightMode', enabled ? '1' : '0');
+      const label = document.querySelector('#nightModeBtn span:last-child');
+      if (label) label.textContent = enabled ? '日间' : '深夜';
+    }
+
+    function toggleNightMode() {
+      applyNightMode(!document.body.classList.contains('dark-mode'));
+    }
 
     async function checkSession() {
         try {
@@ -2228,7 +2285,6 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         document.getElementById('runText').textContent = '待机';
         document.getElementById('currentModel').textContent = '当前模型：-';
         document.getElementById('progressText').textContent = '进度：0/0';
-        document.getElementById('lastError').style.display = 'none';
     }
 
     function startPolling() {
@@ -2258,6 +2314,30 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       const div = document.createElement('div');
       div.textContent = text ?? '';
       return div.innerHTML;
+    }
+
+    function chinaDate(value = Date.now()) {
+      if (typeof value === 'string' && value && !/[zZ]|[+-]\d\d:\d\d$/.test(value)) {
+        return new Date(`${value}+08:00`);
+      }
+      return new Date(value);
+    }
+
+    function formatChinaTime(value) {
+      return chinaDate(value).toLocaleTimeString('zh-CN', { timeZone: 'Asia/Shanghai' });
+    }
+
+    function formatChinaDateTime(value) {
+      return chinaDate(value).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' });
+    }
+
+    function chinaDateStamp() {
+      return new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'Asia/Shanghai',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      }).format(new Date());
     }
 
     const speakerStyles = {
@@ -2563,6 +2643,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
     function exitShareSelection() {
       shareSelectionMode = false;
+      shareDragActive = false;
+      shareDragMoved = false;
+      sharePointerStartIndex = null;
       selectedShareIndexes.clear();
       renderDialogueMessages();
       updateShareControls();
@@ -2586,6 +2669,32 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       else selectedShareIndexes.add(index);
       renderDialogueMessages();
       updateShareControls();
+    }
+
+    function selectShareMessage(index) {
+      if (!shareSelectionMode || selectedShareIndexes.has(index)) return;
+      selectedShareIndexes.add(index);
+      renderDialogueMessages();
+      updateShareControls();
+    }
+
+    function selectShareRange(fromIndex, toIndex) {
+      if (!shareSelectionMode || fromIndex == null || toIndex == null) return;
+      const start = Math.min(fromIndex, toIndex);
+      const end = Math.max(fromIndex, toIndex);
+      for (let index = start; index <= end; index += 1) selectedShareIndexes.add(index);
+      renderDialogueMessages();
+      updateShareControls();
+    }
+
+    function selectShareMessageUnderPointer(clientX, clientY) {
+      const target = document.elementFromPoint(clientX, clientY);
+      const item = target?.closest?.('.msg[data-message-index]');
+      if (!item) return;
+      const index = Number(item.dataset.messageIndex);
+      if (index === sharePointerStartIndex && !shareDragMoved) return;
+      shareDragMoved = true;
+      selectShareRange(sharePointerStartIndex, index);
     }
 
     function roundRect(ctx, x, y, width, height, radius) {
@@ -2705,7 +2814,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       ctx.fillText('多 AI 对话摘录', padding, 22);
       ctx.fillStyle = '#64748b';
       ctx.font = '13px "Segoe UI", "Microsoft YaHei", sans-serif';
-      ctx.fillText(`${new Date().toLocaleString('zh-CN')} · ${selected.length} 条消息`, padding, 56);
+      ctx.fillText(`${formatChinaDateTime()} · ${selected.length} 条消息`, padding, 56);
 
       let y = headerHeight + 16;
       rows.forEach(row => {
@@ -2754,7 +2863,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         ctx.drawImage(qrImage, width - padding - 92, height - footerHeight + 20, 92, 92);
       }
 
-      downloadCanvas(canvas, `对话长图-${new Date().toISOString().slice(0, 10)}.png`);
+      downloadCanvas(canvas, `对话长图-${chinaDateStamp()}.png`);
     }
 
     function bindKeyboardShortcuts() {
@@ -2782,7 +2891,54 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         const item = event.target.closest('.msg[data-message-index]');
         if (!item) return;
         event.preventDefault();
+        if (shareSuppressNextClick) {
+          shareSuppressNextClick = false;
+          return;
+        }
+        if (shareDragMoved) {
+          shareDragMoved = false;
+          return;
+        }
         toggleShareMessage(Number(item.dataset.messageIndex));
+      });
+      messagesRoot.addEventListener('pointerdown', event => {
+        if (!shareSelectionMode || event.button !== 0) return;
+        const item = event.target.closest('.msg[data-message-index]');
+        if (!item) return;
+        event.preventDefault();
+        shareDragActive = true;
+        shareDragMoved = false;
+        sharePointerStartIndex = Number(item.dataset.messageIndex);
+        sharePointerStartX = event.clientX;
+        sharePointerStartY = event.clientY;
+      });
+      messagesRoot.addEventListener('pointerover', event => {
+        if (!shareSelectionMode || !shareDragActive) return;
+        const item = event.target.closest('.msg[data-message-index]');
+        if (!item) return;
+        const index = Number(item.dataset.messageIndex);
+        if (index === sharePointerStartIndex && !shareDragMoved) return;
+        shareDragMoved = true;
+        selectShareRange(sharePointerStartIndex, index);
+      });
+      document.addEventListener('pointermove', event => {
+        if (!shareSelectionMode || !shareDragActive) return;
+        const moved = Math.abs(event.clientX - sharePointerStartX) + Math.abs(event.clientY - sharePointerStartY);
+        if (moved < 8) return;
+        event.preventDefault();
+        const rect = messagesRoot.getBoundingClientRect();
+        if (event.clientY < rect.top + 36) messagesRoot.scrollBy({ top: -18 });
+        if (event.clientY > rect.bottom - 36) messagesRoot.scrollBy({ top: 18 });
+        selectShareMessageUnderPointer(event.clientX, event.clientY);
+      });
+      document.addEventListener('pointerup', () => {
+        if (shareSelectionMode && shareDragActive && !shareDragMoved && sharePointerStartIndex != null) {
+          toggleShareMessage(sharePointerStartIndex);
+          shareSuppressNextClick = true;
+          setTimeout(() => { shareSuppressNextClick = false; }, 350);
+        }
+        shareDragActive = false;
+        sharePointerStartIndex = null;
       });
       messagesRoot.addEventListener('scroll', () => {
         const distanceFromBottom = messagesRoot.scrollHeight - messagesRoot.scrollTop - messagesRoot.clientHeight;
@@ -2811,14 +2967,6 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       document.getElementById('runText').textContent = showStopped ? '已停止' : (status.stop_requested ? '停止中' : (status.running ? '运行' : '待机'));
       document.getElementById('currentModel').textContent = status.running ? '' : '当前模型：-';
       document.getElementById('progressText').textContent = `进度：${status.completed_calls || 0}/${status.total_calls || 0}`;
-      const errorEl = document.getElementById('lastError');
-      if (status.last_error) {
-        errorEl.textContent = status.last_error;
-        errorEl.style.display = '';
-      } else {
-        errorEl.textContent = '';
-        errorEl.style.display = 'none';
-      }
       document.getElementById('continueBtn').disabled = status.running;
       document.getElementById('stopBtn').disabled = !status.running || status.stop_requested;
       document.getElementById('stopLabel').textContent = showStopped ? '已停止' : (status.stop_requested ? '停止中' : '停止');
@@ -2850,7 +2998,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       const data = await api('/api/dialogue');
       hasMessages = data.messages.length > 0;
       currentDialogueMessages = data.messages;
-      document.getElementById('lastUpdate').textContent = `最后更新：${new Date(data.last_update).toLocaleTimeString('zh-CN')}`;
+      document.getElementById('lastUpdate').textContent = `最后更新：${formatChinaTime(data.last_update)}`;
       const root = document.getElementById('messages');
       const distanceFromBottom = root.scrollHeight - root.scrollTop - root.clientHeight;
       const wasNearBottom = distanceFromBottom < 72 && !userScrollLock;
@@ -2908,6 +3056,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     if (loginUsername) loginUsername.addEventListener('keydown', function(e) { if (e.key === 'Enter') handleAuthSubmit(); });
     if (loginInviteCode) loginInviteCode.addEventListener('keydown', function(e) { if (e.key === 'Enter') handleAuthSubmit(); });
 
+    applyNightMode(localStorage.getItem('nightMode') === '1');
     bindKeyboardShortcuts();
     checkSession().then(function(loggedIn) {
         if (loggedIn) {
@@ -2926,7 +3075,7 @@ LITE_TEMPLATE = r"""<!DOCTYPE html>
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>AI Panel Lite</title>
+  <title>智能虚拟过家家 Lite</title>
   <style>
     body {
       margin: 0;
@@ -3003,7 +3152,7 @@ LITE_TEMPLATE = r"""<!DOCTYPE html>
     </div>
   </div>
   <header>
-    <h1>AI Panel Lite</h1>
+    <h1>智能虚拟过家家 Lite</h1>
     <div class="muted" id="status">连接中...</div>
   </header>
   <main>
@@ -3133,7 +3282,7 @@ def main():
 
     server = ThreadingHTTPServer((HOST, PORT), PanelHandler)
     print("=" * 50)
-    print("多 AI 对话控制台")
+    print("智能虚拟过家家")
     print("=" * 50)
     if MULTI_USER:
         print("多用户模式已启用")
