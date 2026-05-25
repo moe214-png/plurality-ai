@@ -1781,7 +1781,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       font-weight: 700;
     }
     .toggle input { width: auto; }
-    .chat {
+    section.chat {
       order: -1;
       height: calc(100vh - 92px);
       min-height: 540px;
@@ -1789,7 +1789,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       display: grid;
       grid-template-rows: auto auto auto minmax(0, 1fr) auto auto;
       overflow: hidden;
-      background: var(--chat-bg);
+      background: var(--chat-bg) !important;
     }
     .chat-mode-row {
       border-bottom: 1px solid var(--line);
@@ -1819,7 +1819,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       display: grid;
       align-content: start;
       gap: 12px;
-      background: var(--chat-bg);
+      background: var(--chat-bg) !important;
       align-self: stretch;
       height: 100%;
       min-height: 0;
@@ -1952,6 +1952,11 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       color: var(--muted);
       text-align: center;
       padding: 60px 20px;
+      min-height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--chat-bg);
     }
     .typing {
       display: none;
