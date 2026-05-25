@@ -454,6 +454,7 @@ def apply_mode_preset(config, mode):
     if not preset:
         return config
     default_models = {model.get("id"): model for model in DEFAULT_CONFIG.get("models", [])}
+    config["models"] = [model for model in config.get("models", []) if model.get("id") in default_models]
     config["dialogue_mode"] = mode
     config["conversation_goal"] = preset["goal"]
     for model in config.get("models", []):
@@ -504,6 +505,39 @@ def extract_json_object(text):
         raise
 
 
+def safe_model_id(value, existing_ids, index):
+    raw = str(value or "").strip().lower()
+    raw = re.sub(r"[^a-z0-9_]+", "_", raw)
+    raw = re.sub(r"_+", "_", raw).strip("_")
+    if not raw or raw in existing_ids or raw in {"user", "assistant"}:
+        raw = f"custom_{index}"
+    candidate = raw
+    suffix = 2
+    while candidate in existing_ids:
+        candidate = f"{raw}_{suffix}"
+        suffix += 1
+    return candidate
+
+
+def deepseek_role_template(deepseek, role_id):
+    clone = {
+        "id": role_id,
+        "name": role_id,
+        "avatar": role_id[:2].upper(),
+        "enabled": True,
+        "speaker_weight": 1.0,
+        "provider": deepseek.get("provider", "openai_compatible"),
+        "base_url": deepseek.get("base_url", "https://api.deepseek.com"),
+        "model": deepseek.get("model", "deepseek-v4-flash"),
+        "api_key_env": deepseek.get("api_key_env", "DEEPSEEK_API_KEY"),
+        "system_prompt": deepseek.get("system_prompt", ""),
+    }
+    for key in ("api_key_env_fallbacks", "temperature", "top_p", "thinking"):
+        if key in deepseek:
+            clone[key] = deepseek[key]
+    return clone
+
+
 def customize_complex_scenario(payload, username=None):
     description = (payload.get("description") or "").strip()
     if not description:
@@ -511,6 +545,8 @@ def customize_complex_scenario(payload, username=None):
 
     load_dotenv(FOLDER / ".env", override=True)
     config = save_config_from_payload(payload.get("config", {}), username)
+    default_ids = {model.get("id") for model in DEFAULT_CONFIG.get("models", [])}
+    config["models"] = [model for model in config.get("models", []) if model.get("id") in default_ids]
     deepseek = next((model for model in config.get("models", []) if model.get("id") == "deepseek"), None)
     if not deepseek:
         return {"ok": False, "error": "没有找到 DeepSeek，无法生成复杂定制"}, 400
@@ -530,7 +566,7 @@ def customize_complex_scenario(payload, username=None):
     ]
     planner_prompt = (
         "你是一个多 AI 场景编排器。用户会给出复杂对话需求，你要为每个 AI 分配不同 skill/persona，"
-        "并给出适合这个场景的昵称和短头像。必须只输出 JSON，不要解释。\n\n"
+        "并给出适合这个场景的昵称和短头像。你还要判断是否需要新增 AI 角色；如果用户写了需要多少个角色，尽量按该数量规划。必须只输出 JSON，不要解释。\n\n"
         "JSON 格式：\n"
         "{\n"
         '  "conversation_goal": "这次对话的总体目标",\n'
@@ -539,7 +575,10 @@ def customize_complex_scenario(payload, username=None):
         "  ]\n"
         "}\n\n"
         "要求：\n"
-        "- 必须覆盖给定 roster 里的每个 id，不要创造新 id。\n"
+        "- 必须覆盖给定 roster 里的每个 id。\n"
+        "- 如果复杂需求需要更多角色，可以新增 id，建议命名 custom_1、custom_2 这种英文小写 id。\n"
+        "- 总角色数最多 12 个；如果用户要求超过 12 个，只规划 12 个。\n"
+        "- 新增角色默认会使用 DeepSeek 模型，你只需要返回它的 id、name、avatar、speaker_weight、system_prompt。\n"
         "- 每个 AI 的 skill 要明显不同，能协作又不会重复。\n"
         "- system_prompt 要可直接作为该 AI 的系统提示词，使用中文。\n"
         "- avatar 不要用图片 URL。\n\n"
@@ -553,9 +592,26 @@ def customize_complex_scenario(payload, username=None):
     except Exception as exc:
         return {"ok": False, "error": f"复杂定制生成失败: {compact_call_error(exc)}"}, 500
 
-    assignments = {item.get("id"): item for item in plan.get("models", []) if item.get("id")}
+    raw_assignments = [item for item in plan.get("models", []) if item.get("id")]
+    assignments = {item.get("id"): item for item in raw_assignments}
     if not assignments:
         return {"ok": False, "error": "DeepSeek 没有返回可用的人格分配"}, 500
+
+    max_roles = 12
+    existing_ids = {model.get("id") for model in config.get("models", [])}
+    extra_index = 1
+    for item in raw_assignments:
+        requested_id = item.get("id")
+        if requested_id in existing_ids:
+            continue
+        if len(config.get("models", [])) >= max_roles:
+            break
+        role_id = safe_model_id(requested_id, existing_ids, extra_index)
+        extra_index += 1
+        existing_ids.add(role_id)
+        item["id"] = role_id
+        assignments[role_id] = item
+        config["models"].append(deepseek_role_template(deepseek, role_id))
 
     config["dialogue_mode"] = "custom"
     config["conversation_goal"] = (plan.get("conversation_goal") or description).strip()
@@ -1658,7 +1714,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       <h2>复杂场景定制</h2>
       <label>
         需求描述
-        <textarea id="customDescription" placeholder="写下你希望这组 AI 扮演的复杂场景、协作方式、语气和目标"></textarea>
+        <textarea id="customDescription" placeholder="写下复杂场景、协作方式、语气和目标；也可以写需要多少个角色，例如：需要 8 个 AI 角色"></textarea>
       </label>
       <div class="error" id="customError"></div>
       <div class="custom-actions">
@@ -2007,12 +2063,14 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       if (!preset) return;
       config.dialogue_mode = mode;
       config.conversation_goal = preset.goal;
-      config.models = config.models.map(model => ({
-        ...model,
-        name: defaultProfiles[model.id]?.name || model.name,
-        avatar: defaultProfiles[model.id]?.avatar || model.avatar,
-        system_prompt: preset.prompts?.[model.id] || model.system_prompt,
-      }));
+      config.models = config.models
+        .filter(model => defaultProfiles[model.id])
+        .map(model => ({
+          ...model,
+          name: defaultProfiles[model.id]?.name || model.name,
+          avatar: defaultProfiles[model.id]?.avatar || model.avatar,
+          system_prompt: preset.prompts?.[model.id] || model.system_prompt,
+        }));
       document.getElementById('goal').value = config.conversation_goal;
       renderModels();
     }
