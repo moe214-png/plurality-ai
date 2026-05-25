@@ -2006,13 +2006,13 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       40% { opacity: 1; transform: translateY(-2px); }
     }
     .interject {
-      border-top: 1px solid var(--line);
+      border-top: 0;
       padding: 10px 12px;
       display: grid;
       grid-template-columns: 1fr auto;
       gap: 10px;
       align-items: end;
-      background: var(--toolbar);
+      background: var(--chat-bg) !important;
       min-height: 63px;
       z-index: 3;
     }
