@@ -1458,7 +1458,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       --soft: #17243a;
       --input-bg: #101720;
       --subtle: #121a24;
-      --toolbar: #111827;
+      --toolbar: #0b1118;
       --chat-bg: #0b1118;
       --secondary: #263241;
       --secondary-hover: #334155;
@@ -1535,10 +1535,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         gap: 8px;
         align-items: center;
       }
-      .status-main { min-width: 0; order: 1; }
+      .status-main { min-width: 0; }
       .status-main #currentModel { display: none; }
       .status .user-info {
-        order: 2;
         justify-content: end;
         min-width: 0;
         margin-left: 0;
@@ -1549,7 +1548,6 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         text-overflow: ellipsis;
         white-space: nowrap;
       }
-      #nightModeBtn { order: 3; grid-column: 1; justify-self: start; }
       main { padding: 10px; gap: 10px; }
       section { border-radius: 0; }
       .controls {
@@ -1682,15 +1680,26 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       line-height: 1;
     }
     .icon-button {
-      min-height: 0;
+      min-height: 0 !important;
       border-radius: 0;
-      padding: 2px;
-      background: transparent;
-      color: var(--muted);
+      padding: 2px !important;
+      background: transparent !important;
+      color: var(--muted) !important;
     }
     .icon-button:hover {
-      background: transparent;
-      color: var(--text);
+      background: transparent !important;
+      color: var(--text) !important;
+    }
+    .toolbar-action {
+      min-height: 0 !important;
+      padding: 4px 6px !important;
+      border-radius: 0;
+      background: transparent !important;
+      color: var(--muted) !important;
+    }
+    .toolbar-action:hover {
+      background: transparent !important;
+      color: var(--text) !important;
     }
     .secondary .icon,
     .link-button .icon {
@@ -1780,6 +1789,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       display: grid;
       grid-template-rows: auto auto auto minmax(0, 1fr) auto auto;
       overflow: hidden;
+      background: var(--toolbar);
     }
     .chat-mode-row {
       border-bottom: 1px solid var(--line);
@@ -1801,6 +1811,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       align-items: center;
       gap: 8px;
       flex-wrap: nowrap;
+      background: var(--toolbar);
     }
     .messages {
       overflow: auto;
@@ -1994,7 +2005,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       grid-template-columns: 1fr auto;
       gap: 10px;
       align-items: end;
-      background: var(--panel);
+      background: var(--toolbar);
       min-height: 63px;
       z-index: 3;
     }
@@ -2052,9 +2063,18 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       width: auto;
       height: auto;
       border-radius: 0;
-      background: transparent;
+      background: transparent !important;
       color: currentColor;
       font-size: 15px;
+    }
+    body.dark-mode .chat,
+    body.dark-mode .chat-mode-row,
+    body.dark-mode .chat-toolbar,
+    body.dark-mode .share-actions,
+    body.dark-mode .messages,
+    body.dark-mode .typing,
+    body.dark-mode .interject {
+      background: var(--chat-bg);
     }
     /* ── Login overlay ── */
     .login-overlay {
@@ -2160,9 +2180,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         <span id="currentModel">当前模型：-</span>
         <span id="progressText">进度：0/0</span>
       </span>
-      <button class="icon-button" type="button" id="nightModeBtn" onclick="toggleNightMode()" aria-label="切换深夜模式"><span class="icon plain">☾</span></button>
       <span class="user-info" id="userSection" style="display:none;">
         <span class="username" id="currentUser"></span>
+        <button class="icon-button" type="button" id="nightModeBtn" onclick="toggleNightMode()" aria-label="切换深夜模式"><span class="icon plain">☾</span></button>
         <button class="secondary tool-button" onclick="logout()" style="padding:4px 10px;font-size:12px;">登出</button>
       </span>
     </div>
@@ -2255,13 +2275,13 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         <strong>对话记录</strong>
         <span class="notice" id="lastUpdate">最后更新：-</span>
         <div class="export-menu" id="exportMenu">
-          <button class="secondary tool-button" type="button" onclick="toggleExportMenu(event)"><span class="icon">↓</span><span>导出</span></button>
+          <button class="toolbar-action tool-button" type="button" onclick="toggleExportMenu(event)"><span class="icon">↓</span><span>导出</span></button>
           <div class="export-options">
             <a href="/export/markdown" onclick="closeExportMenu()"><span class="icon">MD</span><span>Markdown</span></a>
             <a href="/export/json" onclick="closeExportMenu()"><span class="icon">{}</span><span>JSON</span></a>
           </div>
         </div>
-        <button class="secondary tool-button" type="button" onclick="startShareSelection()"><span class="icon">▢</span><span>截图</span></button>
+        <button class="toolbar-action tool-button" type="button" onclick="startShareSelection()"><span class="icon">▢</span><span>截图</span></button>
       </div>
       <div class="share-actions" id="shareActions">
         <span class="share-count" id="shareCount">已选择 0 条</span>
