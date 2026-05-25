@@ -37,7 +37,7 @@
       "speaker_weight": 1,
       "provider": "openai_compatible",
       "base_url": "https://api.tokenfree.shop/v1",
-      "model": "gpt-5-mini",
+      "model": "gpt-5.4-mini",
       "api_key_env": "OPENAI_API_KEY",
       "system_prompt": "你是 ChatGPT。抽象模式下你负责让怪话仍然好懂：可以玩梗、调侃、用网络语气接话，但别硬堆热词。回答要像聊天里的抽象段子，不要列清单，不要写方案。",
       "avatar": "GPT"

@@ -77,7 +77,7 @@ DEFAULT_CONFIG = {
             "speaker_weight": 1.0,
             "provider": "openai_compatible",
             "base_url": "https://api.tokenfree.shop/v1",
-            "model": "gpt-5-mini",
+            "model": "gpt-5.4-mini",
             "api_key_env": "OPENAI_API_KEY",
             "system_prompt": "你是 ChatGPT。你擅长把话题接得顺、让聊天继续自然流动。闲聊模式下避免标题和列表，用轻松清楚的段落说话，可以适当追问，但不要像在写方案。",
         },
