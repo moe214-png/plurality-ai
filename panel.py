@@ -22,7 +22,7 @@ import zipfile
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import quote, urlparse
+from urllib.parse import parse_qs, quote, urlparse
 
 from api_dialogue import (
     CONFIG_FILE,
@@ -175,6 +175,16 @@ def response_text(handler, text, status=200):
     handler.wfile.write(body)
 
 
+def response_svg(handler, svg, status=200):
+    body = svg.encode("utf-8")
+    handler.send_response(status)
+    handler.send_header("Content-Type", "image/svg+xml; charset=utf-8")
+    handler.send_header("Cache-Control", "no-store")
+    handler.send_header("Content-Length", str(len(body)))
+    handler.end_headers()
+    handler.wfile.write(body)
+
+
 def panel_credentials():
     password = os.environ.get("PANEL_PASSWORD", "").strip()
     if not password:
@@ -232,6 +242,238 @@ def response_download(handler, path, filename, content_type):
     handler.send_header("Content-Length", str(len(body)))
     handler.end_headers()
     handler.wfile.write(body)
+
+
+QR_L_BLOCKS = {
+    1: [(1, 19, 7)],
+    2: [(1, 34, 10)],
+    3: [(1, 55, 15)],
+    4: [(1, 80, 20)],
+    5: [(1, 108, 26)],
+    6: [(2, 68, 18)],
+}
+
+
+def gf_tables():
+    exp = [0] * 512
+    log = [0] * 256
+    value = 1
+    for i in range(255):
+        exp[i] = value
+        log[value] = i
+        value <<= 1
+        if value & 0x100:
+            value ^= 0x11D
+    for i in range(255, 512):
+        exp[i] = exp[i - 255]
+    return exp, log
+
+
+GF_EXP, GF_LOG = gf_tables()
+
+
+def gf_mul(x, y):
+    if x == 0 or y == 0:
+        return 0
+    return GF_EXP[GF_LOG[x] + GF_LOG[y]]
+
+
+def rs_generator(degree):
+    poly = [0] * degree
+    poly[-1] = 1
+    root = 1
+    for i in range(degree):
+        for j in range(degree):
+            poly[j] = gf_mul(poly[j], root)
+            if j + 1 < degree:
+                poly[j] ^= poly[j + 1]
+        root = gf_mul(root, 2)
+    return poly
+
+
+def rs_remainder(data, degree):
+    gen = rs_generator(degree)
+    rem = [0] * degree
+    for byte in data:
+        factor = byte ^ rem.pop(0)
+        rem.append(0)
+        for i in range(degree):
+            rem[i] ^= gf_mul(gen[i], factor)
+    return rem
+
+
+def bits_to_bytes(bits):
+    return [int("".join(str(bit) for bit in bits[i:i + 8]), 2) for i in range(0, len(bits), 8)]
+
+
+def make_qr_codewords(text):
+    raw = text.encode("utf-8")
+    for version, blocks in QR_L_BLOCKS.items():
+        data_capacity = sum(count * data_len for count, data_len, _ecc_len in blocks)
+        bit_capacity = data_capacity * 8
+        bits = [0, 1, 0, 0]
+        bits += [(len(raw) >> shift) & 1 for shift in range(7, -1, -1)]
+        for byte in raw:
+            bits += [(byte >> shift) & 1 for shift in range(7, -1, -1)]
+        if len(bits) <= bit_capacity:
+            break
+    else:
+        raise ValueError("二维码内容太长")
+
+    bits += [0] * min(4, bit_capacity - len(bits))
+    while len(bits) % 8:
+        bits.append(0)
+    data = bits_to_bytes(bits)
+    pads = [0xEC, 0x11]
+    pad_index = 0
+    while len(data) < data_capacity:
+        data.append(pads[pad_index % 2])
+        pad_index += 1
+
+    data_blocks = []
+    ecc_blocks = []
+    offset = 0
+    for count, data_len, ecc_len in blocks:
+        for _ in range(count):
+            block = data[offset:offset + data_len]
+            offset += data_len
+            data_blocks.append(block)
+            ecc_blocks.append(rs_remainder(block, ecc_len))
+
+    codewords = []
+    for i in range(max(len(block) for block in data_blocks)):
+        for block in data_blocks:
+            if i < len(block):
+                codewords.append(block[i])
+    for i in range(max(len(block) for block in ecc_blocks)):
+        for block in ecc_blocks:
+            codewords.append(block[i])
+    return version, codewords
+
+
+def draw_qr_square(matrix, reserved, row, col, color, reserve=True):
+    size = len(matrix)
+    if 0 <= row < size and 0 <= col < size:
+        matrix[row][col] = color
+        if reserve:
+            reserved[row][col] = True
+
+
+def draw_finder(matrix, reserved, row, col):
+    for r in range(row - 1, row + 8):
+        for c in range(col - 1, col + 8):
+            if 0 <= r < len(matrix) and 0 <= c < len(matrix):
+                reserved[r][c] = True
+                matrix[r][c] = False
+    for r in range(7):
+        for c in range(7):
+            dark = r in {0, 6} or c in {0, 6} or (2 <= r <= 4 and 2 <= c <= 4)
+            draw_qr_square(matrix, reserved, row + r, col + c, dark)
+
+
+def draw_alignment(matrix, reserved, row, col):
+    for r in range(-2, 3):
+        for c in range(-2, 3):
+            dark = max(abs(r), abs(c)) != 1
+            draw_qr_square(matrix, reserved, row + r, col + c, dark)
+
+
+def qr_format_bits(mask):
+    data = (1 << 3) | mask
+    value = data << 10
+    generator = 0x537
+    for shift in range(14, 9, -1):
+        if (value >> shift) & 1:
+            value ^= generator << (shift - 10)
+    return ((data << 10) | value) ^ 0x5412
+
+
+def set_qr_format(matrix, reserved, mask):
+    size = len(matrix)
+    bits = qr_format_bits(mask)
+    bit = lambda i: ((bits >> (14 - i)) & 1) == 1
+    for i in range(6):
+        draw_qr_square(matrix, reserved, 8, i, bit(i))
+    draw_qr_square(matrix, reserved, 8, 7, bit(6))
+    draw_qr_square(matrix, reserved, 8, 8, bit(7))
+    draw_qr_square(matrix, reserved, 7, 8, bit(8))
+    for i in range(9, 15):
+        draw_qr_square(matrix, reserved, 14 - i, 8, bit(i))
+    for i in range(8):
+        draw_qr_square(matrix, reserved, size - 1 - i, 8, bit(i))
+    for i in range(8, 15):
+        draw_qr_square(matrix, reserved, 8, size - 15 + i, bit(i))
+    draw_qr_square(matrix, reserved, 8, size - 8, True)
+
+
+def qr_mask(mask, row, col):
+    if mask == 0:
+        return (row + col) % 2 == 0
+    return False
+
+
+def qr_svg(text, border=4):
+    version, codewords = make_qr_codewords(text)
+    size = 21 + 4 * (version - 1)
+    matrix = [[False] * size for _ in range(size)]
+    reserved = [[False] * size for _ in range(size)]
+
+    draw_finder(matrix, reserved, 0, 0)
+    draw_finder(matrix, reserved, 0, size - 7)
+    draw_finder(matrix, reserved, size - 7, 0)
+    for i in range(8, size - 8):
+        draw_qr_square(matrix, reserved, 6, i, i % 2 == 0)
+        draw_qr_square(matrix, reserved, i, 6, i % 2 == 0)
+    alignments = {
+        2: [6, 18],
+        3: [6, 22],
+        4: [6, 26],
+        5: [6, 30],
+        6: [6, 34],
+    }.get(version, [])
+    for row in alignments:
+        for col in alignments:
+            if reserved[row][col]:
+                continue
+            draw_alignment(matrix, reserved, row, col)
+    draw_qr_square(matrix, reserved, 4 * version + 9, 8, True)
+    set_qr_format(matrix, reserved, 0)
+
+    bits = []
+    for byte in codewords:
+        bits += [(byte >> shift) & 1 for shift in range(7, -1, -1)]
+    bit_index = 0
+    direction = -1
+    col = size - 1
+    row = size - 1
+    while col > 0:
+        if col == 6:
+            col -= 1
+        while 0 <= row < size:
+            for c in [col, col - 1]:
+                if not reserved[row][c]:
+                    dark = bit_index < len(bits) and bits[bit_index] == 1
+                    if qr_mask(0, row, c):
+                        dark = not dark
+                    matrix[row][c] = dark
+                    bit_index += 1
+            row += direction
+        direction *= -1
+        row += direction
+        col -= 2
+
+    view = size + border * 2
+    cells = []
+    for r, line in enumerate(matrix):
+        for c, dark in enumerate(line):
+            if dark:
+                cells.append(f"M{c + border},{r + border}h1v1h-1z")
+    path = "".join(cells)
+    return (
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{view}" height="{view}" viewBox="0 0 {view} {view}" '
+        f'shape-rendering="crispEdges"><rect width="100%" height="100%" fill="#fff"/>'
+        f'<path fill="#111827" d="{path}"/></svg>'
+    )
 
 
 def response_export_bundle(handler, username=None):
@@ -1069,6 +1311,16 @@ class PanelHandler(BaseHTTPRequestHandler):
                 response_json(self, {"count": len(users), "usernames": sorted(users.keys())})
             else:
                 response_json(self, {"count": 0, "usernames": [], "note": "多用户模式未启用"})
+        elif path == "/api/share-qr":
+            text = parse_qs(urlparse(self.path).query).get("text", [""])[0].strip()
+            if not text:
+                scheme = "https" if self.headers.get("X-Forwarded-Proto") == "https" else "http"
+                host = self.headers.get("Host", f"127.0.0.1:{PORT}")
+                text = f"{scheme}://{host}/"
+            try:
+                response_svg(self, qr_svg(text))
+            except ValueError as exc:
+                response_json(self, {"ok": False, "error": str(exc)}, 400)
         elif path == "/api/env-check":
             response_json(
                 self,
@@ -1436,7 +1688,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       min-height: 540px;
       max-height: 780px;
       display: grid;
-      grid-template-rows: auto minmax(0, 1fr) auto;
+      grid-template-rows: auto auto minmax(0, 1fr) auto auto;
     }
     .chat-toolbar {
       border-bottom: 1px solid var(--line);
@@ -1456,6 +1708,22 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       background: #edf2f7;
       min-height: 0;
     }
+    .share-actions {
+      display: none;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      border-bottom: 1px solid var(--line);
+      padding: 8px 12px;
+      background: #f8fafc;
+    }
+    .share-actions.show { display: flex; }
+    .share-count {
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 700;
+      margin-right: auto;
+    }
     .msg {
       --speaker-color: var(--accent);
       --speaker-soft: #ffffff;
@@ -1464,6 +1732,39 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       gap: 9px;
       font-size: 13px;
       min-width: 0;
+      position: relative;
+    }
+    .messages.share-selecting .msg {
+      cursor: pointer;
+      border-radius: 12px;
+      padding: 4px;
+      margin: -4px;
+    }
+    .messages.share-selecting .msg:hover { background: rgba(37, 99, 235, .08); }
+    .messages.share-selecting .msg.selected .message-text {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+    .message-pick {
+      display: none;
+      width: 22px;
+      height: 22px;
+      border: 1px solid #b6c3d1;
+      border-radius: 50%;
+      background: #fff;
+      color: transparent;
+      align-items: center;
+      justify-content: center;
+      flex: 0 0 auto;
+      font-size: 13px;
+      font-weight: 900;
+      margin-top: 6px;
+    }
+    .messages.share-selecting .message-pick { display: inline-flex; }
+    .msg.selected .message-pick {
+      border-color: var(--accent);
+      background: var(--accent);
+      color: #fff;
     }
     .msg.user {
       --speaker-color: #334155;
@@ -1830,6 +2131,14 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             <a href="/export/json" onclick="closeExportMenu()"><span class="icon">{}</span><span>JSON</span></a>
           </div>
         </div>
+        <button class="secondary tool-button" type="button" onclick="startShareSelection()"><span class="icon">▣</span><span>截图</span></button>
+      </div>
+      <div class="share-actions" id="shareActions">
+        <span class="share-count" id="shareCount">已选择 0 条</span>
+        <button class="secondary tool-button" type="button" onclick="selectAllShareMessages()"><span class="icon">✓</span><span>全选</span></button>
+        <button class="secondary tool-button" type="button" onclick="clearShareSelection()"><span class="icon">○</span><span>清空</span></button>
+        <button class="tool-button" type="button" onclick="generateShareImage()"><span class="icon">⇩</span><span>生成长图</span></button>
+        <button class="secondary tool-button" type="button" onclick="exitShareSelection()"><span class="icon">×</span><span>退出</span></button>
       </div>
       <div id="messages" class="messages">
         <div class="empty">还没有对话。在下方输入消息开始聊天。</div>
@@ -1857,6 +2166,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     let stoppedNoticeUntil = 0;
     let sessionUsername = null;
     let pollTimer = null;
+    let currentDialogueMessages = [];
+    let shareSelectionMode = false;
+    let selectedShareIndexes = new Set();
 
     // ── Auth ──
 
@@ -2231,11 +2543,226 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       document.getElementById('exportMenu').classList.remove('open');
     }
 
+    function updateShareControls() {
+      document.getElementById('shareActions').classList.toggle('show', shareSelectionMode);
+      document.getElementById('messages').classList.toggle('share-selecting', shareSelectionMode);
+      document.getElementById('shareCount').textContent = `已选择 ${selectedShareIndexes.size} 条`;
+    }
+
+    function startShareSelection() {
+      closeExportMenu();
+      if (!currentDialogueMessages.length) {
+        alert('还没有可截图的对话。');
+        return;
+      }
+      shareSelectionMode = true;
+      selectedShareIndexes = new Set();
+      renderDialogueMessages();
+      updateShareControls();
+    }
+
+    function exitShareSelection() {
+      shareSelectionMode = false;
+      selectedShareIndexes.clear();
+      renderDialogueMessages();
+      updateShareControls();
+    }
+
+    function selectAllShareMessages() {
+      selectedShareIndexes = new Set(currentDialogueMessages.map((_, index) => index));
+      renderDialogueMessages();
+      updateShareControls();
+    }
+
+    function clearShareSelection() {
+      selectedShareIndexes.clear();
+      renderDialogueMessages();
+      updateShareControls();
+    }
+
+    function toggleShareMessage(index) {
+      if (!shareSelectionMode) return;
+      if (selectedShareIndexes.has(index)) selectedShareIndexes.delete(index);
+      else selectedShareIndexes.add(index);
+      renderDialogueMessages();
+      updateShareControls();
+    }
+
+    function roundRect(ctx, x, y, width, height, radius) {
+      const r = Math.min(radius, width / 2, height / 2);
+      ctx.beginPath();
+      ctx.moveTo(x + r, y);
+      ctx.arcTo(x + width, y, x + width, y + height, r);
+      ctx.arcTo(x + width, y + height, x, y + height, r);
+      ctx.arcTo(x, y + height, x, y, r);
+      ctx.arcTo(x, y, x + width, y, r);
+      ctx.closePath();
+    }
+
+    function wrapCanvasText(ctx, text, maxWidth) {
+      const lines = [];
+      String(text || '').split('\n').forEach(paragraph => {
+        let line = '';
+        for (const char of paragraph || ' ') {
+          const next = line + char;
+          if (line && ctx.measureText(next).width > maxWidth) {
+            lines.push(line);
+            line = char;
+          } else {
+            line = next;
+          }
+        }
+        lines.push(line);
+      });
+      return lines;
+    }
+
+    function loadShareQr(url) {
+      return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve(img);
+        img.onerror = reject;
+        img.src = `/api/share-qr?text=${encodeURIComponent(url)}`;
+      });
+    }
+
+    function drawShareAvatar(ctx, x, y, size, label, color) {
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.arc(x + size / 2, y + size / 2, size / 2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#ffffff';
+      ctx.font = '700 13px "Segoe UI", "Microsoft YaHei", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(String(label || '?').slice(0, 3), x + size / 2, y + size / 2 + 1);
+    }
+
+    function downloadCanvas(canvas, filename) {
+      const link = document.createElement('a');
+      link.href = canvas.toDataURL('image/png');
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    }
+
+    async function generateShareImage() {
+      const selected = currentDialogueMessages
+        .map((message, index) => ({ message, index }))
+        .filter(item => selectedShareIndexes.has(item.index));
+      if (!selected.length) {
+        alert('请先选择要生成长图的对话气泡。');
+        return;
+      }
+
+      const shareUrl = `${window.location.origin}${window.location.pathname || '/'}`;
+      const qrImage = await loadShareQr(shareUrl).catch(() => null);
+      const width = 720;
+      const padding = 28;
+      const avatarSize = 38;
+      const gap = 10;
+      const bubblePaddingX = 15;
+      const bubblePaddingY = 11;
+      const bubbleMaxWidth = 510;
+      const lineHeight = 22;
+      const metaHeight = 18;
+      const rows = [];
+      const measure = document.createElement('canvas').getContext('2d');
+      measure.font = '15px "Segoe UI", "Microsoft YaHei", sans-serif';
+
+      selected.forEach(({ message }) => {
+        const lines = wrapCanvasText(measure, message.content, bubbleMaxWidth - bubblePaddingX * 2);
+        const maxLineWidth = Math.max(24, ...lines.map(line => measure.measureText(line).width));
+        const bubbleWidth = Math.min(bubbleMaxWidth, Math.ceil(maxLineWidth + bubblePaddingX * 2));
+        const bubbleHeight = Math.max(42, lines.length * lineHeight + bubblePaddingY * 2);
+        rows.push({ message, lines, bubbleWidth, bubbleHeight, height: Math.max(avatarSize, metaHeight + bubbleHeight) + 16 });
+      });
+
+      const headerHeight = 86;
+      const footerHeight = 132;
+      const height = headerHeight + rows.reduce((sum, row) => sum + row.height, 0) + footerHeight;
+      if (height > 28000) {
+        alert('选择内容太多，当前浏览器无法一次生成这么高的图片。请少选一些气泡后再试。');
+        return;
+      }
+
+      const scale = height > 13000 ? 1 : 2;
+      const canvas = document.createElement('canvas');
+      canvas.width = width * scale;
+      canvas.height = height * scale;
+      const ctx = canvas.getContext('2d');
+      ctx.scale(scale, scale);
+      ctx.fillStyle = '#edf2f7';
+      ctx.fillRect(0, 0, width, height);
+
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, width, headerHeight);
+      ctx.fillStyle = '#111827';
+      ctx.font = '700 24px "Segoe UI", "Microsoft YaHei", sans-serif';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+      ctx.fillText('多 AI 对话摘录', padding, 22);
+      ctx.fillStyle = '#64748b';
+      ctx.font = '13px "Segoe UI", "Microsoft YaHei", sans-serif';
+      ctx.fillText(`${new Date().toLocaleString('zh-CN')} · ${selected.length} 条消息`, padding, 56);
+
+      let y = headerHeight + 16;
+      rows.forEach(row => {
+        const { message, lines, bubbleWidth, bubbleHeight } = row;
+        const style = getSpeakerStyle(message);
+        const isUser = message.role === 'user';
+        const avatarX = isUser ? width - padding - avatarSize : padding;
+        const bodyX = isUser ? avatarX - gap - bubbleWidth : padding + avatarSize + gap;
+        drawShareAvatar(ctx, avatarX, y, avatarSize, style.avatar || style.name, style.color || '#64748b');
+
+        ctx.font = '12px "Segoe UI", "Microsoft YaHei", sans-serif';
+        ctx.fillStyle = '#64748b';
+        ctx.textAlign = isUser ? 'right' : 'left';
+        ctx.textBaseline = 'top';
+        const meta = `${style.name || message.model_name || message.role}${message.timestamp ? ' · ' + message.timestamp : ''}`;
+        ctx.fillText(meta, isUser ? bodyX + bubbleWidth : bodyX, y);
+
+        const bubbleY = y + metaHeight;
+        ctx.fillStyle = isUser ? '#334155' : (style.soft || '#ffffff');
+        roundRect(ctx, bodyX, bubbleY, bubbleWidth, bubbleHeight, 17);
+        ctx.fill();
+        ctx.strokeStyle = isUser ? 'rgba(51,65,85,0)' : 'rgba(15,23,42,.08)';
+        ctx.stroke();
+
+        ctx.fillStyle = isUser ? '#ffffff' : '#1d232a';
+        ctx.font = '15px "Segoe UI", "Microsoft YaHei", sans-serif';
+        ctx.textAlign = 'left';
+        lines.forEach((line, lineIndex) => {
+          ctx.fillText(line, bodyX + bubblePaddingX, bubbleY + bubblePaddingY + lineIndex * lineHeight);
+        });
+        y += row.height;
+      });
+
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, height - footerHeight, width, footerHeight);
+      ctx.fillStyle = '#111827';
+      ctx.font = '700 16px "Segoe UI", "Microsoft YaHei", sans-serif';
+      ctx.textAlign = 'left';
+      ctx.fillText('扫码打开网页继续查看', padding, height - footerHeight + 30);
+      ctx.fillStyle = '#64748b';
+      ctx.font = '12px "Segoe UI", "Microsoft YaHei", sans-serif';
+      wrapCanvasText(ctx, shareUrl, 430).slice(0, 2).forEach((line, index) => {
+        ctx.fillText(line, padding, height - footerHeight + 58 + index * 18);
+      });
+      if (qrImage) {
+        ctx.drawImage(qrImage, width - padding - 92, height - footerHeight + 20, 92, 92);
+      }
+
+      downloadCanvas(canvas, `对话长图-${new Date().toISOString().slice(0, 10)}.png`);
+    }
+
     function bindKeyboardShortcuts() {
       document.addEventListener('click', closeExportMenu);
       document.addEventListener('keydown', event => {
         if (event.key === 'Escape') {
           closeExportMenu();
+          if (shareSelectionMode) exitShareSelection();
           if (document.getElementById('customOverlay').classList.contains('show')) closeCustomDialog();
         }
       });
@@ -2250,6 +2777,13 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       });
 
       const messagesRoot = document.getElementById('messages');
+      messagesRoot.addEventListener('click', event => {
+        if (!shareSelectionMode) return;
+        const item = event.target.closest('.msg[data-message-index]');
+        if (!item) return;
+        event.preventDefault();
+        toggleShareMessage(Number(item.dataset.messageIndex));
+      });
       messagesRoot.addEventListener('scroll', () => {
         const distanceFromBottom = messagesRoot.scrollHeight - messagesRoot.scrollTop - messagesRoot.clientHeight;
         const movedUp = messagesRoot.scrollTop < lastMessagesScrollTop - 2;
@@ -2315,6 +2849,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     async function refreshDialogue() {
       const data = await api('/api/dialogue');
       hasMessages = data.messages.length > 0;
+      currentDialogueMessages = data.messages;
       document.getElementById('lastUpdate').textContent = `最后更新：${new Date(data.last_update).toLocaleTimeString('zh-CN')}`;
       const root = document.getElementById('messages');
       const distanceFromBottom = root.scrollHeight - root.scrollTop - root.clientHeight;
@@ -2322,26 +2857,45 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       if (!data.messages.length) {
         root.innerHTML = '<div class="empty">还没有对话。输入提示词后点击开始。</div>';
         userScrollLock = false;
+        shareSelectionMode = false;
+        selectedShareIndexes.clear();
+        updateShareControls();
         lastMessagesScrollTop = root.scrollTop;
         return;
       }
-      root.innerHTML = data.messages.map(message => `
-        <article class="msg ${message.role === 'user' ? 'user' : ''}" style="--speaker-color: ${getSpeakerStyle(message).color}; --speaker-soft: ${getSpeakerStyle(message).soft};">
-          ${renderAvatar(getSpeakerStyle(message).avatar, 'avatar')}
-          <div class="msg-body">
-            <div class="meta">
-              <strong>${escapeHtml(getSpeakerStyle(message).name)}</strong>
-              <span>${escapeHtml(message.model || '')} · ${escapeHtml(message.timestamp || '')}</span>
-            </div>
-            <span class="message-text">${escapeHtml(message.content)}</span>
-          </div>
-        </article>
-      `).join('');
+      selectedShareIndexes = new Set([...selectedShareIndexes].filter(index => index < data.messages.length));
+      renderDialogueMessages();
       if ((stickToBottomOnce && !userScrollLock) || wasNearBottom) {
         root.scrollTop = root.scrollHeight;
       }
       stickToBottomOnce = false;
       lastMessagesScrollTop = root.scrollTop;
+    }
+
+    function renderDialogueMessages() {
+      const root = document.getElementById('messages');
+      if (!currentDialogueMessages.length) {
+        root.innerHTML = '<div class="empty">还没有对话。输入提示词后点击开始。</div>';
+        return;
+      }
+      root.innerHTML = currentDialogueMessages.map((message, index) => {
+        const style = getSpeakerStyle(message);
+        const selected = selectedShareIndexes.has(index);
+        return `
+          <article class="msg ${message.role === 'user' ? 'user' : ''} ${selected ? 'selected' : ''}" data-message-index="${index}" style="--speaker-color: ${style.color}; --speaker-soft: ${style.soft};">
+            <span class="message-pick">${selected ? '✓' : ''}</span>
+            ${renderAvatar(style.avatar, 'avatar')}
+            <div class="msg-body">
+              <div class="meta">
+                <strong>${escapeHtml(style.name)}</strong>
+                <span>${escapeHtml(message.model || '')} · ${escapeHtml(message.timestamp || '')}</span>
+              </div>
+              <span class="message-text">${escapeHtml(message.content)}</span>
+            </div>
+          </article>
+        `;
+      }).join('');
+      updateShareControls();
     }
 
     async function refreshAll() {
