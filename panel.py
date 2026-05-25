@@ -1789,7 +1789,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       display: grid;
       grid-template-rows: auto auto auto minmax(0, 1fr) auto auto;
       overflow: hidden;
-      background: var(--toolbar);
+      background: var(--chat-bg);
     }
     .chat-mode-row {
       border-bottom: 1px solid var(--line);
@@ -1820,6 +1820,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       align-content: start;
       gap: 12px;
       background: var(--chat-bg);
+      align-self: stretch;
+      height: 100%;
       min-height: 0;
     }
     .messages.share-selecting { user-select: none; }
