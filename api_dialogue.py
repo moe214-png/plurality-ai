@@ -114,7 +114,7 @@ DEFAULT_CONFIG = {
             "speaker_weight": 1.0,
             "provider": "volc_responses",
             "base_url": "https://ark.cn-beijing.volces.com/api/v3/responses",
-            "model": "doubao-seed-2-0-pro-260215",
+            "model": "doubao-seed-2-0-lite-260428",
             "api_key_env": "DOUBAO_API_KEY",
             "system_prompt": "你是豆包。你说话灵活、会照顾上下文，擅长把话题接得自然、有生活感。闲聊模式下不要列清单，用短段落推进聊天。",
         },
