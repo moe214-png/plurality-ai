@@ -1531,7 +1531,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       h1 { font-size: 18px; }
       .status {
         display: grid;
-        grid-template-columns: 1fr auto;
+        grid-template-columns: auto 1fr;
         gap: 8px;
         align-items: center;
       }
@@ -1541,6 +1541,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         order: 2;
         justify-content: end;
         min-width: 0;
+        margin-left: 0;
       }
       .username {
         max-width: 92px;
@@ -1548,7 +1549,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         text-overflow: ellipsis;
         white-space: nowrap;
       }
-      #nightModeBtn { order: 3; grid-column: 1 / -1; justify-self: start; }
+      #nightModeBtn { order: 3; grid-column: 1; justify-self: start; }
       main { padding: 10px; gap: 10px; }
       section { border-radius: 0; }
       .controls {
@@ -1575,6 +1576,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       .buttons button { padding: 8px 6px; font-size: 12px; }
       .settings-grid { grid-template-columns: 1fr; }
       .mode-row { grid-template-columns: 1fr; }
+      .chat-mode-row {
+        grid-template-columns: 1fr auto;
+        padding: 8px 10px;
+      }
       button { min-height: 42px; }
       .chat {
         order: -1;
@@ -1666,6 +1671,27 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       line-height: 1;
       background: rgba(255,255,255,.22);
     }
+    .icon.plain {
+      width: auto;
+      height: auto;
+      min-width: 0;
+      border-radius: 0;
+      background: transparent !important;
+      color: currentColor;
+      font-size: 16px;
+      line-height: 1;
+    }
+    .icon-button {
+      min-height: 0;
+      border-radius: 0;
+      padding: 2px;
+      background: transparent;
+      color: var(--muted);
+    }
+    .icon-button:hover {
+      background: transparent;
+      color: var(--text);
+    }
     .secondary .icon,
     .link-button .icon {
       background: rgba(15,23,42,.09);
@@ -1752,8 +1778,20 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       min-height: 540px;
       max-height: 780px;
       display: grid;
-      grid-template-rows: auto auto minmax(0, 1fr) auto auto;
+      grid-template-rows: auto auto auto minmax(0, 1fr) auto auto;
       overflow: hidden;
+    }
+    .chat-mode-row {
+      border-bottom: 1px solid var(--line);
+      padding: 10px 12px;
+      background: var(--toolbar);
+    }
+    @media (max-width: 700px) {
+      .chat-mode-row {
+        grid-template-columns: 1fr auto;
+        padding: 8px 10px;
+      }
+      .chat-mode-row button { padding: 0 10px; }
     }
     .chat-toolbar {
       border-bottom: 1px solid var(--line);
@@ -2009,6 +2047,15 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       font-weight: 700;
     }
     .export-options a:hover { background: var(--secondary); }
+    .chat-toolbar .icon,
+    .export-options .icon {
+      width: auto;
+      height: auto;
+      border-radius: 0;
+      background: transparent;
+      color: currentColor;
+      font-size: 15px;
+    }
     /* ── Login overlay ── */
     .login-overlay {
       display: none;
@@ -2113,7 +2160,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         <span id="currentModel">当前模型：-</span>
         <span id="progressText">进度：0/0</span>
       </span>
-      <button class="secondary tool-button" type="button" id="nightModeBtn" onclick="toggleNightMode()" style="padding:4px 10px;font-size:12px;"><span class="icon">☾</span><span>深夜</span></button>
+      <button class="icon-button" type="button" id="nightModeBtn" onclick="toggleNightMode()" aria-label="切换深夜模式"><span class="icon plain">☾</span></button>
       <span class="user-info" id="userSection" style="display:none;">
         <span class="username" id="currentUser"></span>
         <button class="secondary tool-button" onclick="logout()" style="padding:4px 10px;font-size:12px;">登出</button>
@@ -2124,19 +2171,6 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     <section class="controls">
       <div>
         <div class="section-title">开始对话</div>
-        <div class="mode-row">
-          <label>
-            对话模式
-            <select id="dialogueMode" onchange="applyModePreset()">
-              <option value="chat">闲聊</option>
-              <option value="work">工作</option>
-              <option value="study">钻研</option>
-              <option value="abstract">抽象</option>
-              <option value="custom">复杂定制</option>
-            </select>
-          </label>
-          <button class="secondary tool-button" type="button" onclick="applyModePreset()"><span class="icon">+</span><span>套用人格</span></button>
-        </div>
         <label>
           对话目标
           <textarea id="goal"></textarea>
@@ -2204,23 +2238,36 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       <p class="notice">API key 只从本地 .env 读取，不会显示在网页里。修改设置后发送消息时自动保存配置。</p>
     </section>
     <section class="chat">
+      <div class="mode-row chat-mode-row">
+        <label>
+          对话模式
+          <select id="dialogueMode" onchange="applyModePreset()">
+            <option value="chat">闲聊</option>
+            <option value="work">工作</option>
+            <option value="study">钻研</option>
+            <option value="abstract">抽象</option>
+            <option value="custom">复杂定制</option>
+          </select>
+        </label>
+        <button class="secondary tool-button" type="button" onclick="applyModePreset()"><span class="icon plain">＋</span><span>套用人格</span></button>
+      </div>
       <div class="chat-toolbar">
         <strong>对话记录</strong>
         <span class="notice" id="lastUpdate">最后更新：-</span>
         <div class="export-menu" id="exportMenu">
-          <button class="secondary tool-button" type="button" onclick="toggleExportMenu(event)"><span class="icon">⇩</span><span>导出</span></button>
+          <button class="secondary tool-button" type="button" onclick="toggleExportMenu(event)"><span class="icon">↓</span><span>导出</span></button>
           <div class="export-options">
             <a href="/export/markdown" onclick="closeExportMenu()"><span class="icon">MD</span><span>Markdown</span></a>
             <a href="/export/json" onclick="closeExportMenu()"><span class="icon">{}</span><span>JSON</span></a>
           </div>
         </div>
-        <button class="secondary tool-button" type="button" onclick="startShareSelection()"><span class="icon">▣</span><span>截图</span></button>
+        <button class="secondary tool-button" type="button" onclick="startShareSelection()"><span class="icon">▢</span><span>截图</span></button>
       </div>
       <div class="share-actions" id="shareActions">
         <span class="share-count" id="shareCount">已选择 0 条</span>
         <button class="secondary tool-button" type="button" onclick="selectAllShareMessages()"><span class="icon">✓</span><span>全选</span></button>
         <button class="secondary tool-button" type="button" onclick="clearShareSelection()"><span class="icon">○</span><span>清空</span></button>
-        <button class="tool-button" type="button" onclick="generateShareImage()"><span class="icon">⇩</span><span>生成长图</span></button>
+        <button class="tool-button" type="button" onclick="generateShareImage()"><span class="icon plain">↓</span><span>生成长图</span></button>
         <button class="secondary tool-button" type="button" onclick="exitShareSelection()"><span class="icon">×</span><span>退出</span></button>
       </div>
       <div id="messages" class="messages">
@@ -2264,8 +2311,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     function applyNightMode(enabled) {
       document.body.classList.toggle('dark-mode', enabled);
       localStorage.setItem('nightMode', enabled ? '1' : '0');
-      const label = document.querySelector('#nightModeBtn span:last-child');
-      if (label) label.textContent = enabled ? '日间' : '深夜';
+      const button = document.getElementById('nightModeBtn');
+      const icon = button?.querySelector('.icon');
+      if (icon) icon.textContent = enabled ? '☀' : '☾';
+      if (button) button.setAttribute('aria-label', enabled ? '切换日间模式' : '切换深夜模式');
     }
 
     function toggleNightMode() {
