@@ -1493,6 +1493,13 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       font-size: 14px;
       flex-wrap: wrap;
     }
+    .status-main,
+    .user-info {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
     .dot {
       width: 9px;
       height: 9px;
@@ -1515,8 +1522,33 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       header { align-items: flex-start; flex-direction: column; }
     }
     @media (max-width: 700px) {
-      header { padding: 12px; gap: 10px; }
+      header {
+        padding: 10px 12px;
+        gap: 8px;
+        flex-direction: column;
+        align-items: stretch;
+      }
       h1 { font-size: 18px; }
+      .status {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 8px;
+        align-items: center;
+      }
+      .status-main { min-width: 0; order: 1; }
+      .status-main #currentModel { display: none; }
+      .status .user-info {
+        order: 2;
+        justify-content: end;
+        min-width: 0;
+      }
+      .username {
+        max-width: 92px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      #nightModeBtn { order: 3; grid-column: 1 / -1; justify-self: start; }
       main { padding: 10px; gap: 10px; }
       section { border-radius: 0; }
       .controls {
@@ -1545,9 +1577,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       .mode-row { grid-template-columns: 1fr; }
       button { min-height: 42px; }
       .chat {
-        order: 0;
-        height: calc(100vh - 118px);
-        min-height: 480px;
+        order: -1;
+        height: calc(100dvh - 128px);
+        min-height: 420px;
         max-height: none;
       }
       .interject { grid-template-columns: 1fr auto; }
@@ -1721,6 +1753,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       max-height: 780px;
       display: grid;
       grid-template-rows: auto auto minmax(0, 1fr) auto auto;
+      overflow: hidden;
     }
     .chat-toolbar {
       border-bottom: 1px solid var(--line);
@@ -1848,6 +1881,12 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       line-height: 1.45;
       box-shadow: 0 1px 2px rgba(15, 23, 42, .06);
     }
+    body.dark-mode .msg:not(.user) .message-text {
+      background: #182230;
+      border-color: #334155;
+      color: #e5e7eb;
+    }
+    body.dark-mode .meta strong { color: #f1f5f9; }
     .msg.user .message-text {
       border-color: transparent;
       border-radius: 17px 17px 5px 17px;
@@ -1918,6 +1957,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       gap: 10px;
       align-items: end;
       background: var(--panel);
+      min-height: 63px;
+      z-index: 3;
     }
     .interject textarea { min-height: 42px; max-height: 82px; }
     .interject button {
@@ -2067,9 +2108,11 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   <header>
     <h1>智能虚拟过家家</h1>
     <div class="status">
-      <span><i id="runDot" class="dot"></i> <span id="runText">待机</span></span>
-      <span id="currentModel">当前模型：-</span>
-      <span id="progressText">进度：0/0</span>
+      <span class="status-main">
+        <span><i id="runDot" class="dot"></i> <span id="runText">待机</span></span>
+        <span id="currentModel">当前模型：-</span>
+        <span id="progressText">进度：0/0</span>
+      </span>
       <button class="secondary tool-button" type="button" id="nightModeBtn" onclick="toggleNightMode()" style="padding:4px 10px;font-size:12px;"><span class="icon">☾</span><span>深夜</span></button>
       <span class="user-info" id="userSection" style="display:none;">
         <span class="username" id="currentUser"></span>
