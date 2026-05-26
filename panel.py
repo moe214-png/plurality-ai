@@ -1626,6 +1626,17 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       gap: 10px;
       align-items: end;
     }
+    .mode-label-text {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .scenario-disclaimer {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+    }
     body.fixed-turn label:has(#maxConsecutive) { display: none; }
     body.fixed-turn .row:has(#maxConsecutive) { grid-template-columns: 1fr; }
     .range-inputs {
@@ -1689,6 +1700,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     .icon-button:hover {
       background: transparent !important;
       color: var(--text) !important;
+    }
+    #nightModeBtn {
+      margin-right: 1em;
     }
     .toolbar-action {
       min-height: 0 !important;
@@ -2020,16 +2034,16 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       display: grid;
       grid-template-columns: 1fr auto;
       gap: 10px;
-      align-items: end;
+      align-items: stretch;
       background: var(--chat-bg) !important;
       min-height: 63px;
       z-index: 3;
     }
     .interject textarea { min-height: 42px; max-height: 82px; }
     .interject button {
-      height: 42px;
+      height: auto;
       min-height: 42px;
-      align-self: end;
+      align-self: stretch;
       padding: 0 14px;
     }
     .notice {
@@ -2198,8 +2212,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         <span id="progressText">进度：0/0</span>
       </span>
       <span class="user-info" id="userSection" style="display:none;">
-        <span class="username" id="currentUser"></span>
         <button class="icon-button" type="button" id="nightModeBtn" onclick="toggleNightMode()" aria-label="切换深夜模式"><span class="icon plain">☾</span></button>
+        <span class="username" id="currentUser"></span>
         <button class="secondary tool-button" onclick="logout()" style="padding:4px 10px;font-size:12px;">登出</button>
       </span>
     </div>
@@ -2277,7 +2291,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     <section class="chat">
       <div class="mode-row chat-mode-row">
         <label>
-          对话模式
+          <span class="mode-label-text">对话模式 <span class="scenario-disclaimer">【虚拟演绎，请勿当真】</span></span>
           <select id="dialogueMode" onchange="applyModePreset()">
             <option value="chat">闲聊</option>
             <option value="history">随机历史人物对话</option>
