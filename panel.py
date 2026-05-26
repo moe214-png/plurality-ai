@@ -1585,7 +1585,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         min-height: 0;
         max-height: none;
         overflow: visible;
-        grid-template-rows: auto auto auto auto auto auto;
+        grid-template-rows: auto auto auto auto auto;
       }
       .messages {
         overflow: auto;
@@ -1800,7 +1800,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       min-height: 540px;
       max-height: 780px;
       display: grid;
-      grid-template-rows: auto auto auto minmax(0, 1fr) auto auto;
+      grid-template-rows: auto auto auto minmax(0, 1fr) auto;
       overflow: hidden;
       background: var(--chat-bg) !important;
     }
@@ -1975,7 +1975,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       display: none;
       align-items: flex-start;
       gap: 9px;
-      padding: 0 14px 12px;
+      padding: 0 14px 6px;
       background: var(--chat-bg);
       max-width: 100%;
       position: relative;
@@ -2019,6 +2019,11 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     @keyframes typingPulse {
       0%, 80%, 100% { opacity: .35; transform: translateY(0); }
       40% { opacity: 1; transform: translateY(-2px); }
+    }
+    .composer {
+      background: var(--chat-bg) !important;
+      position: relative;
+      z-index: 4;
     }
     .interject {
       border-top: 0;
@@ -2094,6 +2099,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     body.dark-mode .chat-toolbar,
     body.dark-mode .share-actions,
     body.dark-mode .messages,
+    body.dark-mode .composer,
     body.dark-mode .typing,
     body.dark-mode .interject {
       background: var(--chat-bg);
@@ -2315,16 +2321,18 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       <div id="messages" class="messages">
         <div class="empty">还没有对话。在下方输入消息开始聊天。</div>
       </div>
-      <div id="typingIndicator" class="typing">
-        <span class="avatar" id="typingAvatar">AI</span>
-        <span class="typing-bubble">
-          <span id="typingText">正在输入</span>
-          <span class="typing-dots"><span></span><span></span><span></span></span>
-        </span>
-      </div>
-      <div class="interject">
-        <textarea id="interjectText" placeholder="在这里输入消息，回车或点发送开始对话"></textarea>
-        <button class="tool-button" onclick="interject()"><span class="icon">▶</span><span>发送</span></button>
+      <div class="composer">
+        <div id="typingIndicator" class="typing">
+          <span class="avatar" id="typingAvatar">AI</span>
+          <span class="typing-bubble">
+            <span id="typingText">正在输入</span>
+            <span class="typing-dots"><span></span><span></span><span></span></span>
+          </span>
+        </div>
+        <div class="interject">
+          <textarea id="interjectText" placeholder="在这里输入消息，回车或点发送开始对话"></textarea>
+          <button class="tool-button" onclick="interject()"><span class="icon">▶</span><span>发送</span></button>
+        </div>
       </div>
     </section>
   </main>
