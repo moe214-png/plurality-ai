@@ -1581,16 +1581,16 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       button { min-height: 42px; }
       .chat {
         order: -1;
-        height: auto;
-        min-height: 0;
+        height: calc(100dvh - 150px);
+        min-height: 520px;
         max-height: none;
-        overflow: visible;
-        grid-template-rows: auto auto auto auto auto;
+        overflow: hidden;
+        grid-template-rows: auto auto auto minmax(0, 1fr) auto;
       }
       .messages {
         overflow: auto;
-        min-height: min(360px, 46dvh);
-        max-height: 56dvh;
+        min-height: 0;
+        max-height: none;
         -webkit-overflow-scrolling: touch;
       }
       .typing {
