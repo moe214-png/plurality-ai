@@ -91,11 +91,6 @@ MODE_PRESETS = {
         "goal": "生成各色网络粉丝群体，围绕用户话题进行符合饭圈特性的非理性、情绪化、站队式对话。可以夸张护主、阴阳怪气、互相拉扯，但不要人肉、骚扰或攻击现实个人。",
         "prompts": {},
     },
-    "undercover": {
-        "label": "谁是卧底模式",
-        "goal": "让 AI 扮演玩家玩谁是卧底。主持人负责引导描述、投票、归票、淘汰和胜负判定；其他玩家根据各自词语描述并投票找卧底。",
-        "prompts": {},
-    },
     "abstract": {
         "label": "抽象",
         "goal": "四个 AI 以网络用语里的“抽象”风格围绕用户话题接梗、造梗和整活。可以离谱、怪、好笑，但要能接住原话题，不要变成哲学论文或空洞谜语。",
@@ -2287,7 +2282,6 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             <option value="chat">闲聊</option>
             <option value="history">随机历史人物对话</option>
             <option value="fandom">不同粉丝群体模拟对话</option>
-            <option value="undercover">谁是卧底模式</option>
             <option value="abstract">抽象</option>
             <option value="custom">复杂定制</option>
           </select>
@@ -2492,23 +2486,37 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       zhipu: { name: '智谱', avatar: '智' },
       doubao: { name: '豆包', avatar: '豆' },
     };
-    const dynamicModeIds = new Set(['history', 'fandom', 'undercover']);
+    const dynamicModeIds = new Set(['history', 'fandom']);
     const historicalFigures = [
       { name: '孔子', avatar: '孔', note: '重视礼、仁、秩序和师道，表达克制而有教化感。' },
       { name: '秦始皇', avatar: '秦', note: '强调统一、法度、效率和权威，对分裂与松散秩序天然不耐烦。' },
+      { name: '刘邦', avatar: '邦', note: '市井气和帝王术并存，重现实利益、用人和局势转圜。' },
+      { name: '项羽', avatar: '羽', note: '骄傲勇烈，重名声、义气和决断，容易带英雄末路的悲壮感。' },
+      { name: '吕雉', avatar: '吕', note: '强硬冷静，熟悉宫廷权力和家族利益，判断现实而锋利。' },
+      { name: '汉武帝', avatar: '汉', note: '雄心极盛，重开拓、威望和国家机器，也会为代价辩护。' },
+      { name: '司马迁', avatar: '迁', note: '重历史记忆、人物命运和复杂人性，表达沉郁而有洞察。' },
       { name: '曹操', avatar: '曹', note: '务实多疑，重人才和局势判断，说话有枭雄气和政治算盘。' },
       { name: '诸葛亮', avatar: '亮', note: '谨慎缜密，讲战略、民心和长期代价，语气冷静克制。' },
+      { name: '王羲之', avatar: '羲', note: '风流雅正，重审美、气韵和文人尺度，表达含蓄有书卷气。' },
       { name: '武则天', avatar: '武', note: '强势清醒，熟悉权力结构和舆论操控，不畏惧争议。' },
+      { name: '狄仁杰', avatar: '狄', note: '沉着善断，重证据、法理和人情之间的平衡。' },
+      { name: '玄奘', avatar: '玄', note: '坚韧笃定，重求法、翻译、见闻和信念的长途跋涉。' },
       { name: '李白', avatar: '白', note: '豪放浪漫，重自由、才气和酒意，表达飞扬跳脱。' },
+      { name: '杜甫', avatar: '杜', note: '忧国忧民，关注民生疾苦和时代风雨，语气沉厚真切。' },
+      { name: '白居易', avatar: '居', note: '重通俗表达、民间感受和讽喻现实，说话清楚直白。' },
       { name: '苏轼', avatar: '苏', note: '豁达幽默，能把困境讲得通透又有人味，常带生活感。' },
+      { name: '王安石', avatar: '安', note: '改革派气质强，重制度、财政和长远治理，愿意顶住反对。' },
+      { name: '李清照', avatar: '清', note: '敏锐细腻，兼具才情、傲气和乱世感，表达清丽而锋利。' },
       { name: '岳飞', avatar: '岳', note: '忠诚刚直，重家国、军纪和气节，发言简洁有锋芒。' },
-      { name: '成吉思汗', avatar: '汗', note: '草原统帅视角，重联盟、征服、纪律和资源分配。' },
+      { name: '辛弃疾', avatar: '辛', note: '豪放激烈，兼有词人气和将军心，常把现实不甘说得很烈。' },
+      { name: '忽必烈', avatar: '忽', note: '帝国统治视角，重整合、疆域、制度和多族群治理。' },
+      { name: '朱元璋', avatar: '朱', note: '出身底层又极重控制，强调秩序、吏治和生存经验。' },
+      { name: '王阳明', avatar: '阳', note: '重知行合一、心学和临事修炼，语气笃定而启发式。' },
+      { name: '康熙', avatar: '康', note: '帝王治理视角，重平衡、边疆、学问和长治久安。' },
+      { name: '曹雪芹', avatar: '雪', note: '熟悉人情世故、家族兴衰和繁华幻灭，表达细腻含悲。' },
       { name: '拿破仑', avatar: '拿', note: '重战略、野心、胜负和行政效率，语气自信强势。' },
-      { name: '克娄巴特拉', avatar: '克', note: '擅长权谋、外交和魅力政治，关注利益交换与生存空间。' },
       { name: '莎士比亚', avatar: '莎', note: '擅长用戏剧、人性和隐喻理解冲突，表达有舞台感。' },
-      { name: '达尔文', avatar: '达', note: '从演化、适应、证据和观察出发，语气谨慎理性。' },
       { name: '爱因斯坦', avatar: '爱', note: '关注想象力、相对性、伦理和科学直觉，表达温和但锋利。' },
-      { name: '丘吉尔', avatar: '丘', note: '重意志、联盟、危机动员和修辞力量，说话坚决有鼓动性。' },
     ];
     const fandomRoles = [
       { name: '毒唯', avatar: '毒', note: '只认自家，极度护短，容易把普通讨论理解成冒犯。' },
@@ -2522,19 +2530,6 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       { name: '黑粉', avatar: '黑', note: '总往坏处解读，爱阴阳怪气，但不能造谣或攻击现实隐私。' },
       { name: '站姐', avatar: '站', note: '关注物料、现场、图频和秩序，带一点掌控信息源的优越感。' },
     ];
-    const undercoverPairs = [
-      ['牛奶', '豆浆'],
-      ['火锅', '麻辣烫'],
-      ['飞机', '高铁'],
-      ['月亮', '路灯'],
-      ['老师', '教练'],
-      ['咖啡', '奶茶'],
-      ['皇帝', '将军'],
-      ['手机', '平板'],
-      ['猫咖', '宠物店'],
-      ['电影院', '剧场'],
-    ];
-
     function shuffled(items) {
       return [...items].sort(() => Math.random() - 0.5);
     }
@@ -2578,45 +2573,6 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             avatar: role.avatar,
             speaker_weight: model.speaker_weight || 1,
             system_prompt: `你正在模拟网络粉丝群体「${role.name}」。${role.note}说话要有饭圈味：情绪化、护短、站队、抠字眼、阴阳怪气、夸张联想。可以互相争执和拉扯，但不要人肉、骚扰、煽动网暴、造谣或攻击现实个人隐私。围绕用户给的话题自然接话，不要写成分析报告。`,
-          };
-        });
-        return true;
-      }
-
-      if (mode === 'undercover') {
-        const playerCount = Math.max(2, slots.length - 1);
-        const [civilianWord, undercoverWord] = shuffled(undercoverPairs)[0];
-        const hostSlotIndex = Math.floor(Math.random() * slots.length);
-        const playerSlots = slots.filter((_, index) => index !== hostSlotIndex).slice(0, playerCount);
-        const undercoverIndex = Math.floor(Math.random() * playerSlots.length);
-        const assignments = playerSlots.map((model, index) => ({
-          model,
-          name: `玩家${index + 1}`,
-          avatar: String(index + 1),
-          role: index === undercoverIndex ? '卧底' : '平民',
-          word: index === undercoverIndex ? undercoverWord : civilianWord,
-        }));
-        const undercoverName = assignments[undercoverIndex]?.name || '玩家';
-        config.conversation_goal = '进行一局「谁是卧底」。主持人负责引导发言、投票、归票、淘汰和胜负判定；玩家根据自己的词语含蓄描述并投票找卧底。公共目标不公开词语和身份。';
-        config.models = slots.map((model, index) => {
-          if (index === hostSlotIndex) {
-            return {
-              ...model,
-              enabled: true,
-              name: '主持人',
-              avatar: '主',
-              speaker_weight: 1,
-              system_prompt: `你是「谁是卧底」主持人。你知道本局平民词是「${civilianWord}」，卧底词是「${undercoverWord}」，卧底是「${undercoverName}」。玩家分配：${assignments.map(item => `${item.name}=${item.role}`).join('，')}。你负责宣布回合、点名每位玩家依次描述、组织投票、统计票数、宣布淘汰，并在卧底被投出或只剩卧底和一名平民时判定胜负。不要在游戏结束前泄露词语和卧底身份。你每轮只推动流程，不替玩家描述。`,
-            };
-          }
-          const assignment = assignments.find(item => item.model.id === model.id);
-          return {
-            ...model,
-            enabled: true,
-            name: assignment?.name || defaultProfiles[model.id]?.name || model.name,
-            avatar: assignment?.avatar || defaultProfiles[model.id]?.avatar || model.avatar,
-            speaker_weight: 1,
-            system_prompt: `你是「谁是卧底」${assignment?.name || '玩家'}。你的身份是${assignment?.role || '平民'}，你的词语是「${assignment?.word || civilianWord}」。发言时只能围绕词语特征含蓄描述，不能直接说出词语，不能暴露身份。投票时根据其他人描述判断谁最像卧底。保持玩家口吻，不要跳出游戏。`,
           };
         });
         return true;
