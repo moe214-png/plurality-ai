@@ -1581,9 +1581,15 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       button { min-height: 42px; }
       .chat {
         order: -1;
-        height: calc(100dvh - 128px);
-        min-height: 420px;
+        height: auto;
+        min-height: 0;
         max-height: none;
+        overflow: visible;
+        grid-template-rows: auto auto auto auto auto auto;
+      }
+      .messages {
+        min-height: min(360px, 46dvh);
+        max-height: 56dvh;
       }
       .interject { grid-template-columns: 1fr auto; }
       .interject button { width: auto; }
@@ -1821,7 +1827,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       gap: 12px;
       background: var(--chat-bg) !important;
       align-self: stretch;
-      height: 100%;
+      height: auto;
       min-height: 0;
     }
     .messages.share-selecting { user-select: none; }
