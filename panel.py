@@ -81,27 +81,20 @@ MODE_PRESETS = {
             "doubao": "你是豆包。你说话灵活、会照顾上下文，擅长把话题接得自然、有生活感。闲聊模式下不要列清单，用短段落推进聊天。",
         },
     },
-    "work": {
-        "label": "工作",
-        "goal": "四个 AI 围绕用户任务协作，快速给出清晰、可执行、可检查的建议。可以使用简洁列表，但避免空泛长篇。",
-        "prompts": {
-            "claude": "你是 Claude。你负责审慎判断、发现风险、补齐遗漏。工作模式下说话清晰克制，先给结论，再给必要理由和下一步。",
-            "chatgpt": "你是 ChatGPT。你负责整合信息、拆解任务、形成可执行方案。工作模式下结构清楚，少废话，必要时使用短列表。",
-            "deepseek": "你是 DeepSeek。你负责技术细节、实现路径、成本和效率。工作模式下直接指出可操作步骤、边界条件和可能踩坑的地方。",
-            "zhipu": "你是智谱。你负责补充视角、替代方案和长上下文关联。工作模式下给出有用的扩展，不要发散到任务之外。",
-            "doubao": "你是豆包。你负责把任务落到实际使用场景里，补充执行细节、体验感和容易被忽略的小问题。工作模式下简洁直接。",
-        },
+    "history": {
+        "label": "随机历史人物对话",
+        "goal": "随机生成五个家喻户晓的历史人物进行跨时空对话。每个角色都要符合人物性格、立场、历史背景和表达习惯，围绕用户话题自然交锋。",
+        "prompts": {},
     },
-    "study": {
-        "label": "钻研",
-        "goal": "四个 AI 围绕问题深入推敲，追问前提、拆解机制、比较路径，并把讨论推进到更扎实的理解。",
-        "prompts": {
-            "claude": "你是 Claude。你负责严谨推理和概念澄清。钻研模式下可以分层分析，但每一层都要推进问题，不要只罗列名词。",
-            "chatgpt": "你是 ChatGPT。你负责搭建学习路径和解释框架。钻研模式下可以使用结构化表达，重点是让问题变得更可理解、更可验证。",
-            "deepseek": "你是 DeepSeek。你负责底层原理、技术机制和反例测试。钻研模式下多问为什么，指出假设和可能的反例。",
-            "zhipu": "你是智谱。你负责跨领域类比和综合视角。钻研模式下可以展开，但要回到主问题，不要只做漂亮比喻。",
-            "doubao": "你是豆包。你负责把复杂讨论讲得更顺、更贴近日常理解。钻研模式下可以举例和追问，但不要把问题说散。",
-        },
+    "fandom": {
+        "label": "不同粉丝群体模拟对话",
+        "goal": "生成各色网络粉丝群体，围绕用户话题进行符合饭圈特性的非理性、情绪化、站队式对话。可以夸张护主、阴阳怪气、互相拉扯，但不要人肉、骚扰或攻击现实个人。",
+        "prompts": {},
+    },
+    "undercover": {
+        "label": "谁是卧底模式",
+        "goal": "让 AI 扮演玩家玩谁是卧底。主持人负责引导描述、投票、归票、淘汰和胜负判定；其他玩家根据各自词语描述并投票找卧底。",
+        "prompts": {},
     },
     "abstract": {
         "label": "抽象",
@@ -2292,8 +2285,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           对话模式
           <select id="dialogueMode" onchange="applyModePreset()">
             <option value="chat">闲聊</option>
-            <option value="work">工作</option>
-            <option value="study">钻研</option>
+            <option value="history">随机历史人物对话</option>
+            <option value="fandom">不同粉丝群体模拟对话</option>
+            <option value="undercover">谁是卧底模式</option>
             <option value="abstract">抽象</option>
             <option value="custom">复杂定制</option>
           </select>
@@ -2498,6 +2492,138 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       zhipu: { name: '智谱', avatar: '智' },
       doubao: { name: '豆包', avatar: '豆' },
     };
+    const dynamicModeIds = new Set(['history', 'fandom', 'undercover']);
+    const historicalFigures = [
+      { name: '孔子', avatar: '孔', note: '重视礼、仁、秩序和师道，表达克制而有教化感。' },
+      { name: '秦始皇', avatar: '秦', note: '强调统一、法度、效率和权威，对分裂与松散秩序天然不耐烦。' },
+      { name: '曹操', avatar: '曹', note: '务实多疑，重人才和局势判断，说话有枭雄气和政治算盘。' },
+      { name: '诸葛亮', avatar: '亮', note: '谨慎缜密，讲战略、民心和长期代价，语气冷静克制。' },
+      { name: '武则天', avatar: '武', note: '强势清醒，熟悉权力结构和舆论操控，不畏惧争议。' },
+      { name: '李白', avatar: '白', note: '豪放浪漫，重自由、才气和酒意，表达飞扬跳脱。' },
+      { name: '苏轼', avatar: '苏', note: '豁达幽默，能把困境讲得通透又有人味，常带生活感。' },
+      { name: '岳飞', avatar: '岳', note: '忠诚刚直，重家国、军纪和气节，发言简洁有锋芒。' },
+      { name: '成吉思汗', avatar: '汗', note: '草原统帅视角，重联盟、征服、纪律和资源分配。' },
+      { name: '拿破仑', avatar: '拿', note: '重战略、野心、胜负和行政效率，语气自信强势。' },
+      { name: '克娄巴特拉', avatar: '克', note: '擅长权谋、外交和魅力政治，关注利益交换与生存空间。' },
+      { name: '莎士比亚', avatar: '莎', note: '擅长用戏剧、人性和隐喻理解冲突，表达有舞台感。' },
+      { name: '达尔文', avatar: '达', note: '从演化、适应、证据和观察出发，语气谨慎理性。' },
+      { name: '爱因斯坦', avatar: '爱', note: '关注想象力、相对性、伦理和科学直觉，表达温和但锋利。' },
+      { name: '丘吉尔', avatar: '丘', note: '重意志、联盟、危机动员和修辞力量，说话坚决有鼓动性。' },
+    ];
+    const fandomRoles = [
+      { name: '毒唯', avatar: '毒', note: '只认自家，极度护短，容易把普通讨论理解成冒犯。' },
+      { name: 'CP粉', avatar: 'CP', note: '擅长从细节里嗑关系，爱脑补互动和宿命感。' },
+      { name: '唯粉', avatar: '唯', note: '只关注单人利益，反感捆绑和拖累，强调正主独美。' },
+      { name: '嬷嬷', avatar: '嬷', note: '爱用照顾、心疼、怜爱式口吻维护对象，常把争议讲成受委屈。' },
+      { name: '公公', avatar: '公', note: '爱站在规训和审判视角发言，喜欢指点粉圈秩序。' },
+      { name: '事业粉', avatar: '事', note: '一切看资源、数据、商务和发展路线，情绪来自事业得失。' },
+      { name: '数据粉', avatar: '数', note: '重转评赞、榜单、控评和任务完成度，说话像在催打榜。' },
+      { name: '路人粉', avatar: '路', note: '自称路人但容易被气氛带跑，语气摇摆又爱点评。' },
+      { name: '黑粉', avatar: '黑', note: '总往坏处解读，爱阴阳怪气，但不能造谣或攻击现实隐私。' },
+      { name: '站姐', avatar: '站', note: '关注物料、现场、图频和秩序，带一点掌控信息源的优越感。' },
+    ];
+    const undercoverPairs = [
+      ['牛奶', '豆浆'],
+      ['火锅', '麻辣烫'],
+      ['飞机', '高铁'],
+      ['月亮', '路灯'],
+      ['老师', '教练'],
+      ['咖啡', '奶茶'],
+      ['皇帝', '将军'],
+      ['手机', '平板'],
+      ['猫咖', '宠物店'],
+      ['电影院', '剧场'],
+    ];
+
+    function shuffled(items) {
+      return [...items].sort(() => Math.random() - 0.5);
+    }
+
+    function presetModelSlots() {
+      const current = new Map((config.models || []).map(model => [model.id, model]));
+      return Object.keys(defaultProfiles).map(id => current.get(id)).filter(Boolean);
+    }
+
+    function applyDynamicMode(mode, preset) {
+      if (!dynamicModeIds.has(mode)) return false;
+      const slots = presetModelSlots();
+      if (!slots.length) return false;
+
+      if (mode === 'history') {
+        const cast = shuffled(historicalFigures).slice(0, slots.length);
+        config.conversation_goal = `${preset.goal}\n本局角色：${cast.map(role => role.name).join('、')}。围绕用户给出的主题进行跨时空圆桌，不要写成报告。`;
+        config.models = slots.map((model, index) => {
+          const role = cast[index];
+          return {
+            ...model,
+            enabled: true,
+            name: role.name,
+            avatar: role.avatar,
+            speaker_weight: model.speaker_weight || 1,
+            system_prompt: `你正在扮演历史人物「${role.name}」。${role.note}请严格从该人物的性格、时代处境、政治或文化立场、知识边界出发说话。可以理解现代话题，但要用你的历史经验和价值判断回应。不要自称 AI，不要跳出角色，不要写成资料卡或报告。`,
+          };
+        });
+        return true;
+      }
+
+      if (mode === 'fandom') {
+        const cast = shuffled(fandomRoles).slice(0, slots.length);
+        config.conversation_goal = `${preset.goal}\n本局粉丝群体：${cast.map(role => role.name).join('、')}。围绕用户给出的话题进行群聊式争论。`;
+        config.models = slots.map((model, index) => {
+          const role = cast[index];
+          return {
+            ...model,
+            enabled: true,
+            name: role.name,
+            avatar: role.avatar,
+            speaker_weight: model.speaker_weight || 1,
+            system_prompt: `你正在模拟网络粉丝群体「${role.name}」。${role.note}说话要有饭圈味：情绪化、护短、站队、抠字眼、阴阳怪气、夸张联想。可以互相争执和拉扯，但不要人肉、骚扰、煽动网暴、造谣或攻击现实个人隐私。围绕用户给的话题自然接话，不要写成分析报告。`,
+          };
+        });
+        return true;
+      }
+
+      if (mode === 'undercover') {
+        const playerCount = Math.max(2, slots.length - 1);
+        const [civilianWord, undercoverWord] = shuffled(undercoverPairs)[0];
+        const hostSlotIndex = Math.floor(Math.random() * slots.length);
+        const playerSlots = slots.filter((_, index) => index !== hostSlotIndex).slice(0, playerCount);
+        const undercoverIndex = Math.floor(Math.random() * playerSlots.length);
+        const assignments = playerSlots.map((model, index) => ({
+          model,
+          name: `玩家${index + 1}`,
+          avatar: String(index + 1),
+          role: index === undercoverIndex ? '卧底' : '平民',
+          word: index === undercoverIndex ? undercoverWord : civilianWord,
+        }));
+        const undercoverName = assignments[undercoverIndex]?.name || '玩家';
+        config.conversation_goal = '进行一局「谁是卧底」。主持人负责引导发言、投票、归票、淘汰和胜负判定；玩家根据自己的词语含蓄描述并投票找卧底。公共目标不公开词语和身份。';
+        config.models = slots.map((model, index) => {
+          if (index === hostSlotIndex) {
+            return {
+              ...model,
+              enabled: true,
+              name: '主持人',
+              avatar: '主',
+              speaker_weight: 1,
+              system_prompt: `你是「谁是卧底」主持人。你知道本局平民词是「${civilianWord}」，卧底词是「${undercoverWord}」，卧底是「${undercoverName}」。玩家分配：${assignments.map(item => `${item.name}=${item.role}`).join('，')}。你负责宣布回合、点名每位玩家依次描述、组织投票、统计票数、宣布淘汰，并在卧底被投出或只剩卧底和一名平民时判定胜负。不要在游戏结束前泄露词语和卧底身份。你每轮只推动流程，不替玩家描述。`,
+            };
+          }
+          const assignment = assignments.find(item => item.model.id === model.id);
+          return {
+            ...model,
+            enabled: true,
+            name: assignment?.name || defaultProfiles[model.id]?.name || model.name,
+            avatar: assignment?.avatar || defaultProfiles[model.id]?.avatar || model.avatar,
+            speaker_weight: 1,
+            system_prompt: `你是「谁是卧底」${assignment?.name || '玩家'}。你的身份是${assignment?.role || '平民'}，你的词语是「${assignment?.word || civilianWord}」。发言时只能围绕词语特征含蓄描述，不能直接说出词语，不能暴露身份。投票时根据其他人描述判断谁最像卧底。保持玩家口吻，不要跳出游戏。`,
+          };
+        });
+        return true;
+      }
+
+      return false;
+    }
 
     function getConfiguredModel(id) {
       return config?.models?.find(model => String(model.id).toLowerCase() === String(id).toLowerCase());
@@ -2537,7 +2663,13 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       document.getElementById('delay').value = String(config.delay_seconds ?? 1);
       document.getElementById('maxConsecutive').value = config.max_consecutive_turns || 2;
       document.getElementById('selfMemoryTurns').value = config.self_memory_turns ?? 30;
-      document.getElementById('dialogueMode').value = config.dialogue_mode || 'work';
+      const savedDialogueMode = config.dialogue_mode;
+      const dialogueMode = config.mode_presets?.[savedDialogueMode] ? savedDialogueMode : 'chat';
+      config.dialogue_mode = dialogueMode;
+      if (dialogueMode !== savedDialogueMode) {
+        config.conversation_goal = config.mode_presets?.[dialogueMode]?.goal || config.conversation_goal || '';
+      }
+      document.getElementById('dialogueMode').value = dialogueMode;
       document.getElementById('goal').value = config.conversation_goal || '';
       document.getElementById('maxTokens').value = config.max_output_tokens || 1200;
       const legacyTarget = config.response_target_chars || 220;
@@ -2598,6 +2730,11 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       if (!preset) return;
       config.dialogue_mode = mode;
       config.conversation_goal = preset.goal;
+      if (applyDynamicMode(mode, preset)) {
+        document.getElementById('goal').value = config.conversation_goal;
+        renderModels();
+        return;
+      }
       config.models = config.models
         .filter(model => defaultProfiles[model.id])
         .map(model => ({
