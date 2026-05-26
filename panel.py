@@ -1588,9 +1588,15 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         grid-template-rows: auto auto auto auto auto auto;
       }
       .messages {
-        overflow: visible;
-        min-height: 0;
-        max-height: none;
+        overflow: auto;
+        min-height: min(360px, 46dvh);
+        max-height: 56dvh;
+        -webkit-overflow-scrolling: touch;
+      }
+      .typing {
+        position: relative;
+        z-index: 4;
+        padding: 6px 10px 4px;
       }
       .interject { grid-template-columns: 1fr auto; }
       .interject button { width: auto; }
@@ -1972,6 +1978,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       padding: 0 14px 12px;
       background: var(--chat-bg);
       max-width: 100%;
+      position: relative;
+      z-index: 4;
     }
     .typing.show { display: flex; }
     .typing .avatar {
