@@ -1588,8 +1588,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         grid-template-rows: auto auto auto auto auto auto;
       }
       .messages {
-        min-height: min(360px, 46dvh);
-        max-height: 56dvh;
+        overflow: visible;
+        min-height: 0;
+        max-height: none;
       }
       .interject { grid-template-columns: 1fr auto; }
       .interject button { width: auto; }
