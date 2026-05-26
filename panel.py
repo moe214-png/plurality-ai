@@ -1585,7 +1585,6 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         min-height: 520px;
         max-height: none;
         overflow: hidden;
-        grid-template-rows: auto auto auto minmax(0, 1fr) auto;
       }
       .messages {
         overflow: auto;
@@ -1799,8 +1798,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       height: calc(100vh - 92px);
       min-height: 540px;
       max-height: 780px;
-      display: grid;
-      grid-template-rows: auto auto auto minmax(0, 1fr) auto;
+      display: flex;
+      flex-direction: column;
       overflow: hidden;
       background: var(--chat-bg) !important;
     }
@@ -1833,6 +1832,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       align-content: start;
       gap: 12px;
       background: var(--chat-bg) !important;
+      flex: 1 1 auto;
       align-self: stretch;
       height: auto;
       min-height: 0;
@@ -2022,6 +2022,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     }
     .composer {
       background: var(--chat-bg) !important;
+      flex: 0 0 auto;
       position: relative;
       z-index: 4;
     }
